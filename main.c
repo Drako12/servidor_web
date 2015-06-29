@@ -1,168 +1,209 @@
-#include "network.h"
+#include "server.h"
 
-ssize_t readn (int fd, void *vptr, size_t n)
-{
-  size_t nleft;
-  ssize_t nread;
-  char *ptr;
+/*!
+ * \brief Faz um parse os parametros do terminal para encontrar a porta e o
+ * diretorio onde o servidor sera montado e escreve em uma estrutura
+ *
+ * \param[in] n_params Numero de parametros vindos do terminal
+ * \param[in] dir_path Caminho do diretorio
+ * \param[in] port Porta que o servidor ira escutar
+ * \param[out] s_info Estrutura onde as informacoes serao salvas
+ *
+ * \return 0 se OK
+ * \return -1 se der algum erro
+ */
 
-  ptr = vptr;
-  nleft = n;
-  while (nleft > 0)
+static int parse_param(int n_params, char dir_path, char port,
+                       struct server_info *s_info)
+{ 
+  if(n_params > 3 || n_params < 3)
   {
-    if ( (nread = read (fd, ptr, nleft) ) < 0)
+    fprintf(stderr, "Bad parameters\n");
+    return -1;
+  }
+  strncpy(s_info->dir_path, dir_path, PATH_MAX);    
+  strncpy(s_info->port, port, MAX_PORT);
+
+  return 0;
+}
+
+static server_start(const struct server_info *s_info)
+{
+  int sockfd = -1, ret = 0; 
+  struct sockaddr_in addr;
+  
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(atoi(s_info->port));
+  addr.sin_addr.s_addr = INADDR_ANY;
+  
+
+  if ((sockfd = socket(AF_INET, SOCK_STREAM, 0 )) == -1)
+  {
+    fprintf(stderr, "Socket error:%s\n",strerror(errno));
+    return -1;
+  }
+
+  if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) == -1)
+  {
+    close (sockfd);
+    fprintf(stderr, "Bind error:%s\n",strerror(errno));
+    return -1;    
+  }
+
+  if (listen(sockfd, 10) == -1)
+  {
+    fprintf(stderr, "Listen error:%s\n",strerror(errno));
+    return -1;    
+  }
+  
+  return sockfd;
+}
+
+int server_config_init(struct pollfd *client, int *maxi)
+{
+  int i;
+
+  client[0]->fd = listenfd;
+  client[0]->events = POLLRDNORM;
+  
+  for (i = 1; i < 100; i++)
+    client[i]->fd = -1;
+  maxi = 0;
+
+  return 0;
+}
+
+int set_poll(struct pollfd *client, struct sockaddr_storage *cli_addr
+             int sockfd, int *maxi, socklen_t *clilen, int *client_num) 
+{
+  int connfd, nready = 0;
+   
+  nready =  poll(client, maxi + 1, -1);
+  
+  if (client[0]->revents & POLLRDNORM)
+  {
+    clilen = sizeof(cli_addr);
+    connfd = accept(sockfd, (struct sockaddr *)&cli_addr, &clilen);
+
+   for (client_num = 1; client_num < 100; client_num++)
+   {
+     if (client[client_num]->fd < 0)
+     {
+       client[client_num]->fd = connfd;
+       break;
+     }
+   }
+   
+   if(client_numm == 100)
+     return -1;
+     
+   client[client_num]->events = POLLRDNORM;
+   
+   if (i > maxi)
+     maxi = i;
+
+   if (--nready <= 0)
+     continue;
+  }
+
+  return nready;
+}
+int check_connection(struct pollfd *client, int sockfd, int *maxi,
+                     int *client_num)
+{
+  for (client_num= 1; client_num <= maxi; i++)
+  {
+    if ((sockfd = client[client_num]->fd) < 0)
+      continue;
+      
+    if (client[client_num]->revents & (POLLRDNORM | POLLERR))
+      return sockfd;
+  }
+}
+
+int get_http_msg(struct pollfd *client, char *buffer, int sockfd, 
+                 int client_num)
+{     
+  int num_bytes_read = 0;
+  int num_bytes_aux = 0;
+
+  while (num_bytes_aux < BUFSIZE - 1)
+  {   
+    num_bytes_header = recv(sockfd, header + num_bytes_aux, BUFSIZE -
+                            num_bytes_aux - 1, 0);
+                          
+    if (num_bytes_read < 0)
     {
-      if (errno == EINTR)
+      if(errno == ECONNRESET)
       {
-        nread = 0;
+        close(sockfd);
+        client[client_num]->fd = -1;
       }
       else
-        return (-1);
+      {
+        fprintf(stderr, "Recv error:%s\n", strerror(errno));
+        return -1;
+      }
+      else if(num_bytes_read == 0)
+      {
+        close(sockfd);
+        client[client_num]->fd = -1;
+      }
     }
-    else if (nread == 0)
+
+    if (num_bytes_header == 0)
       break;
-
-    nleft -= nread;
-    ptr += nread;
-  }
-  return (n - nleft);
+    
+    num_bytes_aux += num_bytes_read;     
+  } 
 }
 
-ssize_t writen (int fd, const void *vptr, size_t n)
+int parse_http_msg(char *buffer, char *filename, char *path)
 {
-  size_t nleft;
-  ssize_t nwritten;
-  const char *ptr;
+  int ret;
 
-  ptr = vptr;
-  nleft = n;
-  while (nleft > 0)
-  {
-    if ( (nwritten = write (fd, ptr, nleft) ) <= 0)
-    {
-      if (nwritten < 0 && errno == EINTR)
-      {
-        nwritten = 0;
-      }
-      else
-      {
-        return (-1);
-      }
-    }
-
-    nleft -= nwritten;
-    ptr += nwritten;
-  }
-  return (n);
+  if((ret = sscanf(buffer, "%*[^ ] %s", path)) != 1)
+    
+  
+  strncpy(filename, strrchr(path), NAME_MAX);
+  return 0;
 }
-
+        
 int main (int argc, char *argv[])
 {
-  char *path;
-  int connfd, nready, maxi, i, listenfd, sockfd, len;
+  int nready, maxi, client_num, sockfd, len;
   socklen_t clilen;
   ssize_t n;
   FILE *fp;
   char buffer[BUFSIZE];
   char *buffer2;
-  char *start_line, *end_line, *filename;
-  struct sockaddr_in addr;//, *servinfo, *p;
+  char *start_line, *end_line, filename[NAME_MAX], path[PATH_MAX];
   struct sockaddr_storage cli_addr;
-  struct pollfd client[100];
+  struct pollfd client[MAX_CLIENTS];
+  struct server_info s_info; 
  
-  memset (buffer, 0, sizeof buffer);
-  path = argv[1];    
- 
-  if(argc > 3)
-  {
-    printf("argumentos demais");
-    exit(1);
-  }
- 
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(atoi(argv[2]));
-  addr.sin_addr.s_addr = INADDR_ANY;
+  memset(buffer, 0, sizeof buffer);
+  memset(&s_info, 0, sizeof(s_info));
 
-  if ((listenfd = socket(AF_INET, SOCK_STREAM, 0 )) == -1)
-  {
-    perror ("ERRO NO SOCKET");
-    exit(1);
-  }
-
-  if (bind(listenfd, (struct sockaddr*)&addr, sizeof(addr)) == -1)
-  {
-    close (listenfd);
-    perror ("server: bind");
-    exit(1);
-  }  
-  if (listen(listenfd, 10) == -1)
-  {
-    perror("listen");
-    exit (1);
-  }
-
-  client[0].fd = listenfd;
-  client[0].events = POLLRDNORM;
+  if (parse_param(argc, argv[1], argv[2], &s_info) == -1)
+    return -1;
   
-  for (i = 1; i < 100; i++)
-    client[i].fd = -1;
-  maxi = 0;
+  sockfd = server_start(&s_info);
 
+  if (server_config_init(&client, &maxi) == -1)
+    return -1;
+ 
   while (1)
   {
-    nready = poll (client, maxi + 1, -1);
-    if (client[0].revents & POLLRDNORM)
-    {
-      clilen = sizeof (cli_addr);
-      connfd = accept (listenfd, (struct sockaddr *) &cli_addr, &clilen);
-
-      for (i = 1; i < 100; i++)
-      {
-        if (client[i].fd < 0)
-        {
-          client[i].fd = connfd;
-          break;
-        }
-      }
-
-
-      client[i].events = POLLRDNORM;
-      if (i > maxi)
-        maxi = i;
-
-      if (--nready <= 0)
-        continue;
-    }
-    for (i = 1; i <= maxi; i++)
-    {
-      if ( (sockfd = client[i].fd) < 0)
-        continue;
-      if (client[i].revents & (POLLRDNORM | POLLERR) )
-      {
-        if ( (n = read (sockfd, buffer, BUFSIZE) ) < 0)
-        {
-          if (errno == ECONNRESET)
-          {
-            close (sockfd);
-            client[i].fd = -1;
-          }
-          else
-          {
-            printf ("read error");
-          }
-        }
-        else if (n == 0)
-        {
-          close (sockfd);
-          client[i].fd = -1;
-        }
-        else
-        {
-          if(memcmp("exit",buffer,4) == 0)
-          {
-            close(sockfd);
-            client[i].fd = -1;
-          }
+    
+    nready = set_poll(&client, &cli_addr, sockfd, &maxi, &clilen, &client_num);
+    
+    if ((sockfd = check_connection(&client, sockfd, &maxi, &client_num)) == -1)
+       return -1;
+    if (get_http_msg(&client, &buffer, sockfd, client_num) == -1)
+       return -1;
+    parse_http_msg(buffer);   
+        
                   
           start_line = buffer;
           if (memcmp ("GET", start_line, 3) == 0 )
@@ -184,7 +225,7 @@ int main (int argc, char *argv[])
             if(memcmp(filename, "../", 3) == 0)
             {
               snprintf(header, 1000 * sizeof(char), "HTTP/1.0 403 Forbidden\r\n\r\n");
-              writen(sockfd, header, strlen(header));
+              write(sockfd, header, strlen(header));
               status = 403;
             }
 
@@ -205,19 +246,19 @@ int main (int argc, char *argv[])
              if (errno == ENOENT) 
                snprintf(header, 1000 * sizeof(char), "HTTP/1.0 404 Not Found\r\n\r\n");
              
-             writen(sockfd, header , strlen(header) );
+             write(sockfd, header , strlen(header) );
             }
             else if(status != 403)
             {
             snprintf(header, 1000 * sizeof(char), "HTTP/1.0 200 OK\r\n\r\n");
-            writen(sockfd, header , strlen(header) );
+            write(sockfd, header , strlen(header) );
             
             fseek(fp, 0, SEEK_END);
             len = ftell(fp);
             rewind(fp);
             buffer2 = (char*) malloc(sizeof(char)*len);
             n = fread(buffer2, 1 , len, fp);
-            writen(sockfd, buffer2, n);
+            write(sockfd, buffer2, n);
             fclose(fp);
             close(sockfd);
             client[i].fd = -1;
