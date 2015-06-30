@@ -1,5 +1,5 @@
 #ifndef SERVER_H_INCLUDED
-#define SERVEFR_H_INCLUDED
+#define SERVER_H_INCLUDED
 
 #include <stdio.h>
 #include <string.h>
@@ -14,24 +14,36 @@
 #include <libgen.h>
 #include <poll.h>
 #include <ctype.h>
+#include <limits.h>
 
 #define BUFSIZE BUFSIZ
+#define HEADERSIZE BUFSIZ
 #define MAX_CLIENTS 100
 #define MAX_PORT 65536
-#define MAX_PATH 1024 
+#define NEW 0
+#define STARTED 1
+#define OLD 2
 
 struct server_info
 {
-  char dir_path[MAXPATH];
-  char port[MAXPORT];
+  char dir_path[PATH_MAX];
+  char port[MAX_PORT];
 };
 
-typedef enum
+struct client_info
+{
+  char file_path[PATH_MAX];
+  char *file_position;
+  int file_len;
+  int status;
+};
+
+typedef enum 
 {
   OK = 200,
   FORBIDDEN = 403,
-  NOT FOUND = 404,
-  INTERNAL ERROR 500,
-   
+  NOT_FOUND = 404,
+  INTERNAL_ERROR = 500
 }http_code;
+
 #endif 
