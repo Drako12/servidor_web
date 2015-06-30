@@ -121,7 +121,7 @@ int check_connection(struct pollfd *client, int sockfd, int *maxi,
   }
 }
 
-int get_http_msg(struct pollfd *client, char *buffer, int sockfd, 
+int get_http_request(struct pollfd *client, char *buffer, int sockfd, 
                  int client_num)
 {     
   int num_bytes_read = 0;
@@ -158,20 +158,28 @@ int get_http_msg(struct pollfd *client, char *buffer, int sockfd,
   } 
 }
 
-int parse_http_msg(char *buffer, char *filename, char *path)
+int parse_http_request(char *buffer, char *filename, char *path)
 {
   int ret;
 
   if((ret = sscanf(buffer, "%*[^ ] %s", path)) != 1)
-    
+    return -1;
   
   strncpy(filename, strrchr(path), NAME_MAX);
   return 0;
 }
+
+int verify_path(const char *path, const enum http_code *http_response_code)
+{
+  if(strstr(path, "../") == NULL)
+    return http_code(FORBIDDEN);  
+
+  return access(path, R_OK);
+}
         
 int main (int argc, char *argv[])
 {
-  int nready, maxi, client_num, sockfd, len;
+  int http_code, nready, maxi, client_num, sockfd, len;
   socklen_t clilen;
   ssize_t n;
   FILE *fp;
@@ -181,7 +189,8 @@ int main (int argc, char *argv[])
   struct sockaddr_storage cli_addr;
   struct pollfd client[MAX_CLIENTS];
   struct server_info s_info; 
- 
+  http_code http_response_code;
+
   memset(buffer, 0, sizeof buffer);
   memset(&s_info, 0, sizeof(s_info));
 
@@ -194,65 +203,23 @@ int main (int argc, char *argv[])
     return -1;
  
   while (1)
-  {
-    
+  {    
     nready = set_poll(&client, &cli_addr, sockfd, &maxi, &clilen, &client_num);
     
     if ((sockfd = check_connection(&client, sockfd, &maxi, &client_num)) == -1)
-       return -1;
-    if (get_http_msg(&client, &buffer, sockfd, client_num) == -1)
-       return -1;
-    parse_http_msg(buffer);   
-        
-                  
-          start_line = buffer;
-          if (memcmp ("GET", start_line, 3) == 0 )
-          {
-            start_line += 4;
-            end_line = strchr(start_line, ' ');
-            len = end_line - start_line;
-            filename = (char*) calloc(len + 1, sizeof(char));
-            memmove(filename, start_line, len);
-            
-            char filename_path[1000];
-            char header[1000];
-            int status = 0;
-            if(filename[0] == '/')
-            {
-              memmove(filename, filename + 1, len); 
-            }
-
-            if(memcmp(filename, "../", 3) == 0)
-            {
-              snprintf(header, 1000 * sizeof(char), "HTTP/1.0 403 Forbidden\r\n\r\n");
-              write(sockfd, header, strlen(header));
-              status = 403;
-            }
-
-            if(path[strlen(path) - 1] != '/')
-            {
-              snprintf(filename_path, sizeof(filename_path),"%s/%s",path,filename);
-            }
-            else
-            {
-              snprintf(filename_path, sizeof(filename_path),"%s%s",path,filename);
-            }
-            
+      return -1;
+    if (get_http_request(&client, &buffer, sockfd, client_num) == -1)
+      return -1;
+    if (parse_http_request(buffer, &filename, &path) == -1)
+      return -1;
+    if (verify_path(path, http_response_code) == -1)
+      return -1;
+      
+    send_http_response_header();  
+    send_data();
+    close_connection();
+                            
             fp = fopen(filename_path, "r");
-            if(fp == NULL && status != 403)
-            {               
-             if (errno == EACCES)
-               snprintf(header, 1000 * sizeof(char), "HTTP/1.0 403 Forbidden\r\n\r\n");
-             if (errno == ENOENT) 
-               snprintf(header, 1000 * sizeof(char), "HTTP/1.0 404 Not Found\r\n\r\n");
-             
-             write(sockfd, header , strlen(header) );
-            }
-            else if(status != 403)
-            {
-            snprintf(header, 1000 * sizeof(char), "HTTP/1.0 200 OK\r\n\r\n");
-            write(sockfd, header , strlen(header) );
-            
             fseek(fp, 0, SEEK_END);
             len = ftell(fp);
             rewind(fp);
@@ -262,16 +229,10 @@ int main (int argc, char *argv[])
             fclose(fp);
             close(sockfd);
             client[i].fd = -1;
-            }
-          }
-         
-         memset (buffer, 0, sizeof buffer);
-          
-        }
-        if (--nready <= 0)
-          break;
-      }
-    }
+                   
   }
+     if (--nready <= 0)
+     break;
+
 }
 

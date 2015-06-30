@@ -26,4 +26,12 @@ struct server_info
   char port[MAXPORT];
 };
 
+typedef enum
+{
+  OK = 200,
+  FORBIDDEN = 403,
+  NOT FOUND = 404,
+  INTERNAL ERROR 500,
+   
+}http_code;
 #endif 
