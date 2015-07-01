@@ -16,7 +16,7 @@
 int parse_param(int n_params, char *dir_path, char *port,
                        struct server_info *s_info)
 { 
-  if(n_params > 3 || n_params < 3)
+  if(n_params != 3)
   {
     fprintf(stderr, "Bad parameters\n");
     return -1;
@@ -29,7 +29,7 @@ int parse_param(int n_params, char *dir_path, char *port,
 
 int server_start(const struct server_info *s_info)
 {
-  int sockfd = -1; 
+  int yes = 1, listenfd = -1;
   struct sockaddr_in addr;
   
   addr.sin_family = AF_INET;
@@ -37,100 +37,99 @@ int server_start(const struct server_info *s_info)
   addr.sin_addr.s_addr = INADDR_ANY;
   
 
-  if ((sockfd = socket(AF_INET, SOCK_STREAM, 0 )) == -1)
+  if ((listenfd = socket(AF_INET, SOCK_STREAM, 0 )) == -1)
   {
     fprintf(stderr, "Socket error:%s\n",strerror(errno));
     return -1;
   }
+  
+  setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
 
-  if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) == -1)
+  if (bind(listenfd, (struct sockaddr*)&addr, sizeof(addr)) == -1)
   {
-    close (sockfd);
+    close (listenfd);
     fprintf(stderr, "Bind error:%s\n",strerror(errno));
     return -1;    
   }
 
-  if (listen(sockfd, 10) == -1)
+  if (listen(listenfd, MAX_LISTEN) == -1)
   {
     fprintf(stderr, "Listen error:%s\n",strerror(errno));
     return -1;    
   }
   
-  return sockfd;
+  return listenfd;
 }
 
-int server_config_init(struct pollfd *client, int sockfd,
-                       struct client_info *cli_info)
+int server_config_init(struct pollfd *client, int listenfd,
+                       struct client_info *cli_info, const char *path)
 {
   int i;
 
-  client[0].fd = sockfd;
+  client[0].fd = listenfd;
   client[0].events = POLLIN;
   
   for (i = 1; i < MAX_CLIENTS ; i++)
   {
     client[i].fd = -1;
     cli_info[i].status = NEW;
+    strcpy(cli_info[i].file_path, path);
   }
   
   return 0;
 }
 
-int set_poll(struct pollfd *client, int *max_i_cli)              
+int check_connection(struct pollfd *client, struct server_info *s_info, 
+                     int listenfd)
 {
-  int connfd = 0, client_num, clifd_num;
+  int i, connfd;
+  socklen_t clilen;
+  struct sockaddr_storage cli_addr;
     
-  clifd_num =  poll(client, *max_i_cli + 1, -1);
-}
-
-int check_connection(struct pollfd *client, int sockfd, int max_i_cli, 
-                     int client_num, struct sockaddr_storage *cli_addr,
-                     socklen_t *clilen)
-{
-  if (client[0].revents & POLLIN)
-  {
-    *clilen = sizeof(cli_addr);
-    connfd = accept(sockfd, (struct sockaddr *)&cli_addr, clilen);
+    clilen = sizeof(cli_addr);
+    connfd = accept(listenfd, (struct sockaddr *)&cli_addr, &clilen);
     
-    for (client_num = 1; client_num < MAX_CLIENTS; client_num++)
+    for (i = 1; i < MAX_CLIENTS; i++)
     {
-      if (client[client_num].fd < 0)
+      if (client[i].fd < 0)
       {
-        client[client_num].fd = connfd;
-        client[client_num].events = POLLIN;
-        *max_i_cli = client_num; 
-        return clifd_num;
+        client[i].fd = connfd;
+        client[i].events = POLLIN;
+        break;
       }
-    }   
-  }
-  return -1;  
-
-   if ((sockfd = client[client_num].fd) < 0)
-      return -1;
-      
-   if (client[client_num].revents & (POLLIN | POLLERR))
-      return sockfd;
-
-  return -1;
+    }
+    
+   if (i > s_info->max_i_cli) 
+     s_info->max_i_cli = i; 
+  
+  return 0;
 }
 
-int get_http_request(struct pollfd *client, char *header, int sockfd, 
-                 int client_num)
+int get_http_request(struct pollfd *client, struct client_info *cli_info,
+                     int cli_num)
 {     
   int num_bytes_read = 0;
   int num_bytes_aux = 0;
-
+  
+  cli_info[cli_num].buffer = (char *) calloc(BUFSIZE, sizeof(char));
+  if (cli_info[cli_num].buffer == NULL)
+    return -1;
+    
   while (num_bytes_aux < BUFSIZE - 1)
   {   
-    num_bytes_read = recv(sockfd, header + num_bytes_aux, BUFSIZE -
-                            num_bytes_aux - 1, 0);
-                          
+    num_bytes_read = recv(client[cli_num].fd, cli_info[cli_num].buffer +
+                          num_bytes_aux, BUFSIZE - num_bytes_aux - 1, 0);
+                         
+    if((strstr(cli_info[cli_num].buffer, "\r\n\r\n")) != NULL ||
+    (strstr(cli_info[cli_num].buffer, "\n\n")) != NULL)
+    break;
+
     if (num_bytes_read < 0)
     {
       if(errno == ECONNRESET)
       {
-        close(sockfd);
-        client[client_num].fd = -1;
+        close(client[cli_num].fd);
+        client[cli_num].fd = -1;
         return -1;
       }
       else
@@ -141,8 +140,8 @@ int get_http_request(struct pollfd *client, char *header, int sockfd,
     }  
     else if(num_bytes_read == 0)
     {
-      close(sockfd);
-      client[client_num].fd = -1;
+      close(client[cli_num].fd);
+      client[cli_num].fd = -1;
       return -1;
     }
     
@@ -154,23 +153,22 @@ int get_http_request(struct pollfd *client, char *header, int sockfd,
   return 0;
 }
 
-int parse_http_request(const char *header, int cli_num, 
-                       struct client_info *cli_info)
+int parse_http_request(struct client_info *cli_info, int cli_num)
 {
   int ret;
+  char path[PATH_MAX];
 
-  if((ret = sscanf(header, "%*[^ ] %s", 
-                   cli_info[cli_num].file_path)) != 1)
+  if((ret = sscanf(cli_info[cli_num].buffer, "%*[^ ] %s", path)) != 1)
     return -1;
   
-  //strncpy(filename, strrchr(path), NAME_MAX);
+  strcat(cli_info[cli_num].file_path, path);  
+  
   return 0;
 }
-
-
+  
 int verify_path(const http_code http_response_code, const char *path)
 {
-  if(strstr(path, "../") == NULL)
+  if(strstr(path, "../") != NULL)
     return FORBIDDEN;  
   if(access(path, R_OK) == 0)
     return OK;
@@ -178,15 +176,15 @@ int verify_path(const http_code http_response_code, const char *path)
   return -1;
 }
 
-int send_http_response_header(const http_code http_response_code,
-                              int sockfd)
+int send_http_response_header(const int status, int cli_num,
+                              struct pollfd *client)
 {
   char response_msg[HEADERSIZE];
-  if(http_response_code ==  200)
+  if(status ==  200)
   {
     snprintf(response_msg, sizeof(response_msg),
              "HTTP/1.0 200 OK\r\n\r\n");
-    if (send(sockfd, response_msg, strlen(response_msg), 0) < 0)
+    if (send(client[cli_num].fd, response_msg, strlen(response_msg), 0) < 0)
     {
       fprintf(stderr, "Send error:%s\n", strerror(errno));
       return -1;
@@ -226,12 +224,10 @@ int send_requested_data(FILE *fp, char *buffer, char *path, int sockfd)
 */ 
 int main (int argc, char *argv[])
 {
-  int i, max_i_cli = 0, sockfd, clifd_num;
-  socklen_t clilen;
+  int listenfd;
   FILE *fp;
   char header[BUFSIZE];
   char content[BUFSIZE];
-  struct sockaddr_storage cli_addr;
   struct pollfd client[MAX_CLIENTS];
   struct server_info s_info;
   struct client_info cli_info[MAX_CLIENTS];
@@ -244,40 +240,59 @@ int main (int argc, char *argv[])
   if (parse_param(argc, argv[1], argv[2], &s_info) == -1)
     return -1;
   
-  sockfd = server_start(&s_info);
+  listenfd = server_start(&s_info);
 
-  if (server_config_init(client, sockfd, cli_info) == -1)
+  if (server_config_init(client, listenfd, cli_info, s_info.dir_path) == -1)
     return -1;
  
   while (1)
-  {    
-    clifd_num = set_poll(client, &max_i_cli, &cli_addr,
-                         sockfd, &clilen);
-    if(--clifd_num <= 0)
-      continue;
-    
-    for(i = 1; i <= max_i_cli; i++)
-    {
-      if ((sockfd = check_connection(client, sockfd, i)) == -1)
-        continue;
+  { 
+    int i, nready;
 
-      if (client[i].revents == POLLIN && cli_info[i].status == NEW)
+    nready = poll(client, s_info.max_i_cli + 1, 0);
+    
+    if(client[0].revents & POLLIN)
+    {
+      if(check_connection(client, &s_info, listenfd) == -1)
+        return -1;
+      if(--nready <= 0)
+      continue;
+    }
+
+    for(i = 1; i <= s_info.max_i_cli; i++)
+    {
+     if(client[i].fd < 0)
+       continue;
+
+      if (client[i].revents == POLLIN)
       {
-        if (get_http_request(client, header, sockfd, i) == -1)
+        if (get_http_request(client, cli_info, i) == -1)
           return -1;
-        if (parse_http_request(header, i, cli_info) == -1)
+        if (parse_http_request(cli_info, i) == -1)
           return -1;
-        if ((http_response_code = verify_path(http_response_code, 
+        if ((cli_info[i].request_status = verify_path(http_response_code, 
                                   cli_info[i].file_path)) == -1)
           return -1;
-        cli_info[i].status = STARTED;  
+          
         client[i].events = POLLOUT;
+        if(--nready <=0)
+          continue;
       }
-      if (client[i].revents == POLLOUT &&
-          cli_info[i].status == STARTED)
+
+      if (client[i].revents == POLLOUT)
       {
-        send_http_response_header(http_response_code, sockfd);
-       
+        send_http_response_header(cli_info[i].request_status, i, client);
+        
+        if(!(fp = open_file(path)))
+        {
+          fprintf(stderr, "File error:%s\n", strerror(errno));
+          return -1;
+        }
+        
+        send_requested_data(fp, &buffer, path, sockfd);
+
+        if(--nready <= 0)
+          break;
       }
       
     }
@@ -286,12 +301,6 @@ int main (int argc, char *argv[])
   /*
       
     
-    if(!(fp = open_file(path)))
-    {
-      fprintf(stderr, "File error:%s\n", strerror(errno));
-      return -1;
-    }
-    send_requested_data(fp, &buffer, path, sockfd);
     //close_connection();
     close(sockfd);
     client[client_num].fd = -1;

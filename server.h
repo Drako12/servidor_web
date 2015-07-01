@@ -17,9 +17,10 @@
 #include <limits.h>
 
 #define BUFSIZE BUFSIZ
-#define HEADERSIZE BUFSIZ
-#define MAX_CLIENTS 100
+#define HEADERSIZE 512
+#define MAX_CLIENTS 512
 #define MAX_PORT 65536
+#define MAX_LISTEN 512
 #define NEW 0
 #define STARTED 1
 #define OLD 2
@@ -28,14 +29,18 @@ struct server_info
 {
   char dir_path[PATH_MAX];
   char port[MAX_PORT];
+  int max_i_cli;
 };
 
 struct client_info
 {
+  char *buffer;
   char file_path[PATH_MAX];
   char *file_position;
   int file_len;
+  int request_status;
   int status;
+  FILE *fp;
 };
 
 typedef enum 
