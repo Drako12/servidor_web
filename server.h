@@ -15,15 +15,14 @@
 #include <poll.h>
 #include <ctype.h>
 #include <limits.h>
+#include <stdbool.h>
 
 #define BUFSIZE BUFSIZ
 #define HEADERSIZE 512
 #define MAX_CLIENTS 512
 #define MAX_PORT 65536
 #define MAX_LISTEN 512
-#define NEW 0
-#define STARTED 1
-#define OLD 2
+
 
 struct server_info
 {
@@ -36,10 +35,9 @@ struct client_info
 {
   char *buffer;
   char file_path[PATH_MAX];
-  char *file_position;
-  int file_len;
+  bool  header_sent;
+  bool file_finished;
   int request_status;
-  int status;
   FILE *fp;
 };
 
