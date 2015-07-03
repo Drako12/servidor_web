@@ -23,12 +23,14 @@
 #define MAX_PORT 65536
 #define MAX_LISTEN 512
 
+typedef struct client_list client_list;
+typedef struct client_info client_info;
 
 struct server_info
 {
   char dir_path[PATH_MAX];
   char port[MAX_PORT];
-  int max_i_cli;
+//  int max_i_cli;
 };
 
 struct client_info
@@ -36,20 +38,18 @@ struct client_info
   char *buffer;
   char file_path[PATH_MAX];
   bool  header_sent;
-  bool file_finished;
   int request_status;
   int sockfd;
   FILE *fp;
-  struct pollfd client[MAX_CLIENTS];
+  int cli_num;
   client_info *next;  
 };
 
 struct client_list 
 {
   client_info *head;
-  client_info *curr;
   int list_len; 
-  
+  struct pollfd client[MAX_CLIENTS];  
 };
  
 

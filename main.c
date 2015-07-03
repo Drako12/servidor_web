@@ -76,12 +76,11 @@ int server_config_init(struct pollfd *client, int listenfd)
 
 client_list *create_list()
 {
-  client_list *list = malloc(sizeof(*client_list));
-  list->head == NULL;
+  client_list *list = malloc(sizeof(*list));
   return list;
 }
 
-client_info *list_add(client_list *cli_list, int sockfd)
+client_info *list_add(client_list *cli_list, int sockfd, int cli_num)
 {
   client_info *cli_info;
   
@@ -97,12 +96,43 @@ client_info *list_add(client_list *cli_list, int sockfd)
      i = i->next;
     i->next = cli_info;
   }
-  cli_list.list_len++;
+  cli_list->list_len++;
+  cli_info->cli_num = cli_num;
   return cli_info; 
 }
+void clean_struct(client_info *cli_info)
+{
+  fclose(cli_info->fp);
+  close(cli_info->sockfd);
+  free(cli_info->buffer);
+}
+void list_del(client_info *cli_info, client_list *cli_list)
+{ 
 
-int check_connection(struct pollfd *client, struct server_info *s_info, 
-                     client_list *cli_list, int listenfd)
+  if(cli_info == cli_list->head)
+  {
+    cli_list->head = cli_info->next;
+    free(cli_info);   
+  }
+  else
+  {
+    client_info *current_cli = cli_info;
+    client_info *i = cli_list->head;
+    
+    while (i->next)
+    {
+      if(i->next == current_cli)
+      {
+        i->next = current_cli->next;
+      }
+      i = i->next;
+    }  
+    free(current_cli);
+  }
+  cli_list->list_len--;
+}
+
+int check_connection(client_list *cli_list, int listenfd)
 {
   int i, connfd;
   socklen_t clilen;
@@ -113,17 +143,17 @@ int check_connection(struct pollfd *client, struct server_info *s_info,
     
     for (i = 1; i < MAX_CLIENTS; i++)
     {
-      if (client[i].fd < 0)
+      if (cli_list->client[i].fd < 0)
       {
-        client[i].fd = connfd;
-        client[i].events = POLLIN;
-        list_add(cli_list, connfd);
+        cli_list->client[i].fd = connfd;
+        cli_list->client[i].events = POLLIN;
+        list_add(cli_list, connfd, i);
         break;
       }
     }
     
-   if (i > s_info->max_i_cli) 
-     s_info->max_i_cli = i; 
+  // if (i > s_info->max_i_cli) 
+  //   s_info->max_i_cli = i; 
   
   return 0;
 }
@@ -134,17 +164,17 @@ int get_http_request(struct pollfd *client, struct client_info *cli_info,
   int num_bytes_read = 0;
   int num_bytes_aux = 0;
   
-  cli_info[cli_num].buffer = (char *) calloc(BUFSIZE, sizeof(char));
-  if (cli_info[cli_num].buffer == NULL)
+  cli_info->buffer = (char *) calloc(BUFSIZE, sizeof(char));
+  if (cli_info->buffer == NULL)
     return -1;
     
   while (num_bytes_aux < BUFSIZE - 1)
   {   
-    num_bytes_read = recv(client[cli_num].fd, cli_info[cli_num].buffer +
+    num_bytes_read = recv(cli_info->sockfd, cli_info->buffer +
                           num_bytes_aux, BUFSIZE - num_bytes_aux - 1, 0);
                          
-    if((strstr(cli_info[cli_num].buffer, "\r\n\r\n")) != NULL ||
-    (strstr(cli_info[cli_num].buffer, "\n\n")) != NULL)
+    if((strstr(cli_info->buffer, "\r\n\r\n")) != NULL ||
+    (strstr(cli_info->buffer, "\n\n")) != NULL)
     break;
 
     if (num_bytes_read < 0)
@@ -176,8 +206,7 @@ int get_http_request(struct pollfd *client, struct client_info *cli_info,
   return 0;
 }
 
-int parse_http_request(struct client_info *cli_info, int cli_num,
-                       const char *dir_path)
+int parse_http_request(struct client_info *cli_info, const char *dir_path)
 {
   int ret;
   char path[PATH_MAX];
@@ -185,11 +214,11 @@ int parse_http_request(struct client_info *cli_info, int cli_num,
   strcpy(path, dir_path);
   strcat(path, "/");
 
-  if((ret = sscanf(cli_info[cli_num].buffer, "%*[^ ] %s", path +
+  if((ret = sscanf(cli_info->buffer, "%*[^ ] %s", path +
                    strlen(path))) != 1)
     return -1;
   
-  realpath(path, cli_info[cli_num].file_path); 
+  realpath(path, cli_info->file_path); 
   //strcat(cli_info[cli_num].file_path, path);
   
   return 0;
@@ -207,46 +236,42 @@ int verify_path(const char *path)
   return -1;
 }
 
-int send_http_response_header(struct client_info *cli_info, int cli_num,
-                              struct pollfd *client)
-{
-  char response_msg[HEADERSIZE];
-  if(cli_info[cli_num].request_status ==  200)
-  {
-    snprintf(response_msg, sizeof(response_msg),
-             "HTTP/1.0 200 OK\r\n\r\n");
-    if (send(client[cli_num].fd, response_msg, strlen(response_msg), 0) < 0)
-    {
-      fprintf(stderr, "Send error:%s\n", strerror(errno));
-      return -1;
-    }    
-  }
-  cli_info[cli_num].header_sent = true;
-  return 0;
-}
-
-int open_file(struct client_info *cli_info, int cli_num)
+int open_file(struct client_info *cli_info)
 {  
-  cli_info[cli_num].fp = fopen(cli_info[cli_num].file_path, "rb");
-  if (cli_info[cli_num].fp == NULL)
+  cli_info->fp = fopen(cli_info->file_path, "rb");
+  if (cli_info->fp == NULL)
     return -1;
   
   return 0;
 }
 
-int send_requested_data(struct pollfd *client, struct client_info *cli_info,
-                        int cli_num)
+int send_http_response_header(struct client_info *cli_info)
+{
+  char response_msg[HEADERSIZE];
+  if(cli_info->request_status ==  200)
+  {
+    snprintf(response_msg, sizeof(response_msg),
+             "HTTP/1.0 200 OK\r\n\r\n");
+    if (send(cli_info->sockfd, response_msg, strlen(response_msg), 0) < 0)
+    {
+      fprintf(stderr, "Send error:%s\n", strerror(errno));
+      return -1;
+    }    
+  }
+  cli_info->header_sent = true;
+  return 0;
+}
+//errado 
+int send_requested_data(struct client_info *cli_info)
 {
   int num_bytes_read = 0;
  
-  num_bytes_read = fread(cli_info[cli_num].buffer, sizeof(char), BUFSIZE,
-                         cli_info[cli_num].fp);
+  num_bytes_read = fread(cli_info->buffer, 1, BUFSIZE, cli_info->fp);
 
   if (num_bytes_read < BUFSIZE)
-    cli_info[cli_num].file_finished = true;
+    return 1;
 
-  if (send(client[cli_num].fd, cli_info[cli_num].buffer, 
-           num_bytes_read, 0) < 0)
+  if (send(cli_info->sockfd, cli_info->buffer, num_bytes_read, 0) < 0)
   {
     fprintf(stderr, "Send error:%s\n", strerror(errno));
     return -1;
@@ -262,58 +287,66 @@ int main (int argc, char *argv[])
   struct server_info s_info;
   struct client_list *cli_list = NULL;
  
-  memset(cli_list, 0, sizeof(cli_list));
+  //memset(cli_list, 0, sizeof(*cli_list));
   memset(&s_info, 0, sizeof(s_info));
 
   if (parse_param(argc, argv[1], argv[2], &s_info) == -1)
     return -1;
   
   listenfd = server_start(&s_info);
-
-  if (server_config_init(client, listenfd) == -1)
-    return -1;
   
-  if(cli_list = create_list()) == NULL)
+  if ((cli_list = create_list()) == NULL)
   {
     fprintf(stderr, "Error creating list\n");
     return -1;
   }
-   
+
+  if (server_config_init(cli_list->client, listenfd) == -1)
+    return -1;
+    
   while (1)
   { 
-    int i, nready;
-    const client_info *cli_info = client_list->head;  
+    int i = 1;
    
-    nready = poll(client, cli_list.list_len  + 1, 0);
+    poll(cli_list->client, cli_list->list_len  + 1, 0);
     
-    if(client[0].revents & POLLIN)
+    if (cli_list->client[0].revents & POLLIN)
     {
-      if(check_connection(client, &s_info, cli_list, listenfd) == -1)
+      if (check_connection(cli_list, listenfd) == -1)
         return -1;
-      if(--nready <= 0)
+      
       continue;
     }
-
-    while(cli_list->head)
+    
+    if(cli_list->head == NULL)
+      continue;
+      
+    client_info *cli_info = cli_list->head;  
+    
+    while(cli_info)
     {
-         
-      if(cli_info->sockfd < 0)
-       continue;
-
-      if (cli_info->client.revents == POLLIN)
+     /* for(i = 1;i <= MAX_CLIENTS; i++)
       {
-        if (get_http_request(client, cli_info, i) == -1)
+        if (cli_list->client[i].fd > 0)
+        break;
+      }*/
+     int cli_num;
+     cli_num = cli_info->cli_num;
+
+      if (cli_list->client[cli_num].revents & POLLIN)
+      {
+        if (get_http_request(cli_list->client, cli_info, cli_num) == -1)
         {
           fprintf(stderr,"Erro no get request\n");
           return -1;
         }
-        if (parse_http_request(cli_info, i, s_info.dir_path) == -1)
+        if (parse_http_request(cli_info, s_info.dir_path) == -1)
         {
           fprintf(stderr,"Erro no parse request\n");
           return -1;
         }
-        
-        if ((cli_info[i].request_status = verify_path(cli_info[i].file_path))
+          
+        if ((cli_info->request_status = verify_path(cli_info->file_path))
                                                       == -1)
         {
           fprintf(stderr,"Erro no path\n");
@@ -321,33 +354,37 @@ int main (int argc, char *argv[])
         }
         
            
-        if(open_file(cli_info, i) == -1)
+        if (open_file(cli_info) == -1)
         {
           fprintf(stderr, "File error:%s\n", strerror(errno));
           return -1;
         }
 
-        client[i].events = POLLOUT;
-        
-        if(--nready <=0)
-          continue;
+        cli_list->client[cli_num].events = POLLOUT;
+        cli_info = cli_info->next;               
       }
 
-      if (client[i].revents == POLLOUT)
+      if (cli_list->client[cli_num].revents == POLLOUT)
       {
-        if(cli_info[i].header_sent == false)
-          send_http_response_header(cli_info, i, client);
+        int ret;
+
+        if (cli_info->header_sent == false)
+          send_http_response_header(cli_info);
           
-        send_requested_data(client, cli_info, i);
-        if(cli_info[i].file_finished == true)
+        ret = send_requested_data(cli_info);
+        if (ret == -1)
+        return -1;
+        if (ret == 1)
         {
-          close(client[i].fd);
-          client[i].fd = -1;
-          cli_info[i].file_finished = false;
-          cli_info[i].header_sent = false;
-          fclose(cli_info[i].fp); 
-          continue;
+          clean_struct(cli_info);
+          cli_list->client[cli_num].fd = -1;
+          close(cli_list->client[cli_num].fd);
+          list_del(cli_info, cli_list);
+          break;
         }
+        
+        cli_info = cli_info->next;
+        cli_num++;
       }     
     }  
   } 
