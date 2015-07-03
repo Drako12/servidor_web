@@ -38,8 +38,20 @@ struct client_info
   bool  header_sent;
   bool file_finished;
   int request_status;
+  int sockfd;
   FILE *fp;
+  struct pollfd client[MAX_CLIENTS];
+  client_info *next;  
 };
+
+struct client_list 
+{
+  client_info *head;
+  client_info *curr;
+  int list_len; 
+  
+};
+ 
 
 typedef enum 
 {

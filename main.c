@@ -74,8 +74,35 @@ int server_config_init(struct pollfd *client, int listenfd)
   return 0;
 }
 
+client_list *create_list()
+{
+  client_list *list = malloc(sizeof(*client_list));
+  list->head == NULL;
+  return list;
+}
+
+client_info *list_add(client_list *cli_list, int sockfd)
+{
+  client_info *cli_info;
+  
+  cli_info = malloc(sizeof(*cli_info));
+  cli_info->sockfd = sockfd;
+  cli_info->next = NULL;
+  if(cli_list->head == NULL)
+  cli_list->head = cli_info;
+  else
+  {
+    client_info *i = cli_list->head;
+    while(i->next)
+     i = i->next;
+    i->next = cli_info;
+  }
+  cli_list.list_len++;
+  return cli_info; 
+}
+
 int check_connection(struct pollfd *client, struct server_info *s_info, 
-                     int listenfd)
+                     client_list *cli_list, int listenfd)
 {
   int i, connfd;
   socklen_t clilen;
@@ -90,6 +117,7 @@ int check_connection(struct pollfd *client, struct server_info *s_info,
       {
         client[i].fd = connfd;
         client[i].events = POLLIN;
+        list_add(cli_list, connfd);
         break;
       }
     }
@@ -230,12 +258,11 @@ int send_requested_data(struct pollfd *client, struct client_info *cli_info,
 int main (int argc, char *argv[])
 {
   int listenfd;
-  struct pollfd client[MAX_CLIENTS];
+  //struct pollfd client[MAX_CLIENTS];
   struct server_info s_info;
-  struct client_info cli_info[MAX_CLIENTS];
-  //http_code http_response_code;
-
-  memset(cli_info, 0, sizeof(cli_info));
+  struct client_list *cli_list = NULL;
+ 
+  memset(cli_list, 0, sizeof(cli_list));
   memset(&s_info, 0, sizeof(s_info));
 
   if (parse_param(argc, argv[1], argv[2], &s_info) == -1)
@@ -245,26 +272,35 @@ int main (int argc, char *argv[])
 
   if (server_config_init(client, listenfd) == -1)
     return -1;
- 
+  
+  if(cli_list = create_list()) == NULL)
+  {
+    fprintf(stderr, "Error creating list\n");
+    return -1;
+  }
+   
   while (1)
   { 
     int i, nready;
-    nready = poll(client, s_info.max_i_cli + 1, 0);
+    const client_info *cli_info = client_list->head;  
+   
+    nready = poll(client, cli_list.list_len  + 1, 0);
     
     if(client[0].revents & POLLIN)
     {
-      if(check_connection(client, &s_info, listenfd) == -1)
+      if(check_connection(client, &s_info, cli_list, listenfd) == -1)
         return -1;
       if(--nready <= 0)
       continue;
     }
 
-    for(i = 1; i <= s_info.max_i_cli; i++)
+    while(cli_list->head)
     {
-     if(client[i].fd < 0)
+         
+      if(cli_info->sockfd < 0)
        continue;
 
-      if (client[i].revents == POLLIN)
+      if (cli_info->client.revents == POLLIN)
       {
         if (get_http_request(client, cli_info, i) == -1)
         {
