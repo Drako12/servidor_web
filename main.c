@@ -101,7 +101,7 @@ client_info *list_add(client_list *cli_list, int sockfd, int cli_num)
   return cli_info; 
 }
 void clean_struct(client_info *cli_info)
-{  
+{ 
   fclose(cli_info->fp);
   close(cli_info->sockfd);
   free(cli_info->buffer);
@@ -128,8 +128,8 @@ void list_del(client_info *cli_info, client_list *cli_list)
       i = i->next;
     }  
     free(current_cli);
+    cli_list->client[i->cli_num].events = POLLOUT;
   }
-  cli_list->client[cli_info->cli_num].events = POLLOUT;
   cli_list->list_len--;
 }
 
@@ -240,19 +240,47 @@ int open_file(struct client_info *cli_info)
   return 0;
 }
 
+static char *status_msg(const http_code status)
+{
+  switch (status)
+  {
+    case OK:
+      return "OK";
+      break;
+
+    case BAD_REQUEST:
+      return "BAD REQUEST";
+      break;
+
+    case FORBIDDEN:
+      return "FORBIDDEN";
+      break;
+
+    case NOT_FOUND:
+      return "NOT FOUND";
+      break;
+    case INTERNAL_ERROR:
+      return "INTERNAL ERROR";
+      break;    
+  }
+
+  return NULL;
+}
+
 int send_http_response_header(struct client_info *cli_info)
 {
   char response_msg[HEADERSIZE];
-  if (cli_info->request_status ==  200)
-  {
-    snprintf(response_msg, sizeof(response_msg),
-             "HTTP/1.0 200 OK\r\n\r\n");
+  int status = cli_info->request_status;
+   
+    snprintf(response_msg, sizeof(response_msg), "HTTP/1.0 %d %s\r\n\r\n",
+             status, status_msg(status));
+
     if (send(cli_info->sockfd, response_msg, strlen(response_msg), 0) < 0)
     {
       fprintf(stderr, "Send error:%s\n", strerror(errno));
       return -1;
     }    
-  }
+  
   cli_info->header_sent = true;
   return 0;
 }
@@ -287,7 +315,7 @@ int send_requested_data(struct client_info *cli_info, int num_bytes_read)
   
   return 0;
 }
-
+//talvez seja necessario zerar o cli_info
 void close_connection(struct client_info *cli_info,
                       struct client_list *cli_list)
 {
@@ -366,11 +394,11 @@ int main (int argc, char *argv[])
           break;
         }
         
-           
-        if (open_file(cli_info) == -1)
+     //talvez seja melhor colocar logo antes do envio do header      
+        if (open_file(cli_info) == -1 || cli_info->request_status != OK)
         {
           fprintf(stderr, "File error:%s\n", strerror(errno));
-          return -1;
+          break;
         }
 
         cli_list->client[cli_num].events = POLLOUT;
@@ -382,7 +410,8 @@ int main (int argc, char *argv[])
         if (cli_info->header_sent == false)
           send_http_response_header(cli_info);
         
-        if (send_requested_data(cli_info, get_filedata(cli_info))  == -1 || 
+        if (cli_info->request_status == OK) 
+          if (send_requested_data(cli_info, get_filedata(cli_info))  == -1 || 
                                 feof(cli_info->fp))
         {
         close_connection(cli_info, cli_list);
