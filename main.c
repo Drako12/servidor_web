@@ -84,15 +84,15 @@ client_info *list_add(client_list *cli_list, int sockfd, int cli_num)
 {
   client_info *cli_info;
   
-  cli_info = malloc(sizeof(*cli_info));
+  cli_info = calloc(1, sizeof(*cli_info));
   cli_info->sockfd = sockfd;
   cli_info->next = NULL;
-  if(cli_list->head == NULL)
+  if (cli_list->head == NULL)
   cli_list->head = cli_info;
   else
   {
     client_info *i = cli_list->head;
-    while(i->next)
+    while (i->next)
      i = i->next;
     i->next = cli_info;
   }
@@ -101,7 +101,7 @@ client_info *list_add(client_list *cli_list, int sockfd, int cli_num)
   return cli_info; 
 }
 void clean_struct(client_info *cli_info)
-{
+{  
   fclose(cli_info->fp);
   close(cli_info->sockfd);
   free(cli_info->buffer);
@@ -109,7 +109,7 @@ void clean_struct(client_info *cli_info)
 void list_del(client_info *cli_info, client_list *cli_list)
 { 
 
-  if(cli_info == cli_list->head)
+  if (cli_info == cli_list->head)
   {
     cli_list->head = cli_info->next;
     free(cli_info);   
@@ -121,7 +121,7 @@ void list_del(client_info *cli_info, client_list *cli_list)
     
     while (i->next)
     {
-      if(i->next == current_cli)
+      if (i->next == current_cli)
       {
         i->next = current_cli->next;
       }
@@ -129,6 +129,7 @@ void list_del(client_info *cli_info, client_list *cli_list)
     }  
     free(current_cli);
   }
+  cli_list->client[cli_info->cli_num].events = POLLOUT;
   cli_list->list_len--;
 }
 
@@ -158,8 +159,7 @@ int check_connection(client_list *cli_list, int listenfd)
   return 0;
 }
 
-int get_http_request(struct pollfd *client, struct client_info *cli_info,
-                     int cli_num)
+int get_http_request(struct client_info *cli_info)
 {     
   int num_bytes_read = 0;
   int num_bytes_aux = 0;
@@ -173,16 +173,14 @@ int get_http_request(struct pollfd *client, struct client_info *cli_info,
     num_bytes_read = recv(cli_info->sockfd, cli_info->buffer +
                           num_bytes_aux, BUFSIZE - num_bytes_aux - 1, 0);
                          
-    if((strstr(cli_info->buffer, "\r\n\r\n")) != NULL ||
-    (strstr(cli_info->buffer, "\n\n")) != NULL)
+    if ((strstr(cli_info->buffer, "\r\n\r\n")) != NULL ||
+       (strstr(cli_info->buffer, "\n\n")) != NULL)
     break;
 
     if (num_bytes_read < 0)
     {
-      if(errno == ECONNRESET)
+      if (errno == ECONNRESET)
       {
-        close(client[cli_num].fd);
-        client[cli_num].fd = -1;
         return -1;
       }
       else
@@ -191,12 +189,9 @@ int get_http_request(struct pollfd *client, struct client_info *cli_info,
         return -1;
       }
     }  
-    else if(num_bytes_read == 0)
-    {
-      close(client[cli_num].fd);
-      client[cli_num].fd = -1;
+    else if (num_bytes_read == 0)
       return -1;
-    }
+    
     
     if (num_bytes_read == 0)
     break;
@@ -214,7 +209,7 @@ int parse_http_request(struct client_info *cli_info, const char *dir_path)
   strcpy(path, dir_path);
   strcat(path, "/");
 
-  if((ret = sscanf(cli_info->buffer, "%*[^ ] %s", path +
+  if ((ret = sscanf(cli_info->buffer, "%*[^ ] %s", path +
                    strlen(path))) != 1)
     return -1;
   
@@ -226,9 +221,9 @@ int parse_http_request(struct client_info *cli_info, const char *dir_path)
   
 int verify_path(const char *path)
 {
-  if(strstr(path, "../") != NULL)
+  if (strstr(path, "../") != NULL)
     return FORBIDDEN;  
-  if(access(path, R_OK) == 0)
+  if (access(path, R_OK) == 0)
     return OK;
   else
     return NOT_FOUND;
@@ -248,7 +243,7 @@ int open_file(struct client_info *cli_info)
 int send_http_response_header(struct client_info *cli_info)
 {
   char response_msg[HEADERSIZE];
-  if(cli_info->request_status ==  200)
+  if (cli_info->request_status ==  200)
   {
     snprintf(response_msg, sizeof(response_msg),
              "HTTP/1.0 200 OK\r\n\r\n");
@@ -261,33 +256,57 @@ int send_http_response_header(struct client_info *cli_info)
   cli_info->header_sent = true;
   return 0;
 }
-//errado 
-int send_requested_data(struct client_info *cli_info)
+
+int get_filedata(struct client_info *cli_info)
 {
   int num_bytes_read = 0;
  
   num_bytes_read = fread(cli_info->buffer, 1, BUFSIZE, cli_info->fp);
-
-  if (num_bytes_read < BUFSIZE)
-    return 1;
-
-  if (send(cli_info->sockfd, cli_info->buffer, num_bytes_read, 0) < 0)
-  {
-    fprintf(stderr, "Send error:%s\n", strerror(errno));
+  if (num_bytes_read < 0)
     return -1;
+ 
+  return num_bytes_read;
+}
+
+int send_requested_data(struct client_info *cli_info, int num_bytes_read)
+{
+  int i, ret;
+
+  for (i = 0; i < num_bytes_read; i++)
+  {
+    ret = send(cli_info->sockfd, cli_info->buffer, num_bytes_read, 0); 
+    if (ret < 0)
+    {
+      if (errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN)
+        continue;
+      fprintf(stderr, "Send error:%s\n", strerror(errno));
+      return -1;          
+    }
+    i += ret;
   }
   
   return 0;
 }
- 
+
+void close_connection(struct client_info *cli_info,
+                      struct client_list *cli_list)
+{
+  int cli_num = cli_info->cli_num;
+  
+  clean_struct(cli_info);
+  cli_list->client[cli_num].fd = -1;
+  close(cli_list->client[cli_num].fd);
+  close(cli_info->sockfd);
+  list_del(cli_info, cli_list);
+}
+
+
 int main (int argc, char *argv[])
 {
   int listenfd;
-  //struct pollfd client[MAX_CLIENTS];
   struct server_info s_info;
   struct client_list *cli_list = NULL;
- 
-  //memset(cli_list, 0, sizeof(*cli_list));
+   
   memset(&s_info, 0, sizeof(s_info));
 
   if (parse_param(argc, argv[1], argv[2], &s_info) == -1)
@@ -305,9 +324,7 @@ int main (int argc, char *argv[])
     return -1;
     
   while (1)
-  { 
-    int i = 1;
-   
+  {   
     poll(cli_list->client, cli_list->list_len  + 1, 0);
     
     if (cli_list->client[0].revents & POLLIN)
@@ -324,33 +341,29 @@ int main (int argc, char *argv[])
     client_info *cli_info = cli_list->head;  
     
     while(cli_info)
-    {
-     /* for(i = 1;i <= MAX_CLIENTS; i++)
-      {
-        if (cli_list->client[i].fd > 0)
-        break;
-      }*/
+    {     
      int cli_num;
      cli_num = cli_info->cli_num;
 
       if (cli_list->client[cli_num].revents & POLLIN)
       {
-        if (get_http_request(cli_list->client, cli_info, cli_num) == -1)
+        if (get_http_request(cli_info) == -1)
         {
+          close_connection(cli_info, cli_list);
           fprintf(stderr,"Erro no get request\n");
-          return -1;
+          break;
         }
         if (parse_http_request(cli_info, s_info.dir_path) == -1)
         {
           fprintf(stderr,"Erro no parse request\n");
-          return -1;
+          break;
         }
           
         if ((cli_info->request_status = verify_path(cli_info->file_path))
                                                       == -1)
         {
           fprintf(stderr,"Erro no path\n");
-          return -1;
+          break;
         }
         
            
@@ -366,25 +379,16 @@ int main (int argc, char *argv[])
 
       if (cli_list->client[cli_num].revents == POLLOUT)
       {
-        int ret;
-
         if (cli_info->header_sent == false)
           send_http_response_header(cli_info);
-          
-        ret = send_requested_data(cli_info);
-        if (ret == -1)
-        return -1;
-        if (ret == 1)
-        {
-          clean_struct(cli_info);
-          cli_list->client[cli_num].fd = -1;
-          close(cli_list->client[cli_num].fd);
-          list_del(cli_info, cli_list);
-          break;
-        }
         
-        cli_info = cli_info->next;
-        cli_num++;
+        if (send_requested_data(cli_info, get_filedata(cli_info))  == -1 || 
+                                feof(cli_info->fp))
+        {
+        close_connection(cli_info, cli_list);
+        break;
+        }
+        cli_info = cli_info->next;       
       }     
     }  
   } 
