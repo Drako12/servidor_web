@@ -13,7 +13,7 @@
  * \return -1 se der algum erro
  */
 
-int parse_param(int n_params, char *dir_path, char *port,
+static int parse_param(int n_params, char *dir_path, char *port,
                        struct server_info *s_info)
 { 
   if(n_params != 3)
@@ -27,7 +27,7 @@ int parse_param(int n_params, char *dir_path, char *port,
   return 0;
 }
 
-int server_start(const struct server_info *s_info)
+static int server_start(const struct server_info *s_info)
 {
   int yes = 1, listenfd = -1;
   struct sockaddr_in addr;
@@ -61,7 +61,7 @@ int server_start(const struct server_info *s_info)
   return listenfd;
 }
 
-int server_config_init(struct pollfd *client, int listenfd)
+static int server_config_init(struct pollfd *client, int listenfd)
 {
   int i;
 
@@ -74,13 +74,13 @@ int server_config_init(struct pollfd *client, int listenfd)
   return 0;
 }
 
-client_list *create_list()
+static client_list *create_list()
 {
   client_list *list = malloc(sizeof(*list));
   return list;
 }
 
-client_info *list_add(client_list *cli_list, int sockfd, int cli_num)
+static client_info *list_add(client_list *cli_list, int sockfd, int cli_num)
 {
   client_info *cli_info;
   
@@ -100,15 +100,15 @@ client_info *list_add(client_list *cli_list, int sockfd, int cli_num)
   cli_info->cli_num = cli_num;
   return cli_info; 
 }
-void clean_struct(client_info *cli_info)
+static void clean_struct(client_info *cli_info)
 { 
+  if (cli_info->fp)
   fclose(cli_info->fp);
   close(cli_info->sockfd);
   free(cli_info->buffer);
 }
-void list_del(client_info *cli_info, client_list *cli_list)
-{ 
-
+static void list_del(client_info *cli_info, client_list *cli_list)
+{
   if (cli_info == cli_list->head)
   {
     cli_list->head = cli_info->next;
@@ -133,7 +133,7 @@ void list_del(client_info *cli_info, client_list *cli_list)
   cli_list->list_len--;
 }
 
-int check_connection(client_list *cli_list, int listenfd)
+static int check_connection(client_list *cli_list, int listenfd)
 {
   int i, connfd;
   socklen_t clilen;
@@ -152,14 +152,11 @@ int check_connection(client_list *cli_list, int listenfd)
         break;
       }
     }
-    
-  // if (i > s_info->max_i_cli) 
-  //   s_info->max_i_cli = i; 
-  
+
   return 0;
 }
 
-int get_http_request(struct client_info *cli_info)
+static int get_http_request(struct client_info *cli_info)
 {     
   int num_bytes_read = 0;
   int num_bytes_aux = 0;
@@ -219,7 +216,7 @@ int parse_http_request(struct client_info *cli_info, const char *dir_path)
   return 0;
 }
   
-int verify_path(const char *path)
+static int verify_path(const char *path)
 {
   if (strstr(path, "../") != NULL)
     return FORBIDDEN;  
@@ -284,7 +281,7 @@ int send_http_response_header(struct client_info *cli_info)
   cli_info->header_sent = true;
   return 0;
 }
-
+//procurar erro aqui ou no send
 int get_filedata(struct client_info *cli_info)
 {
   int num_bytes_read = 0;
@@ -299,7 +296,8 @@ int get_filedata(struct client_info *cli_info)
 int send_requested_data(struct client_info *cli_info, int num_bytes_read)
 {
   int i, ret;
-
+  //fazer if num_bytes_read = -1 para tentar ler novamente o arquivo ou
+  // verificar o arquivo e descritor novamente 
   for (i = 0; i < num_bytes_read; i++)
   {
     ret = send(cli_info->sockfd, cli_info->buffer, num_bytes_read, 0); 
@@ -352,9 +350,16 @@ int main (int argc, char *argv[])
     return -1;
     
   while (1)
-  {   
-    poll(cli_list->client, cli_list->list_len  + 1, 0);
-    
+  { 
+    int ret;
+    cli_list->client[0].fd = listenfd;
+    cli_list->client[0].events = POLLIN;
+    cli_list->client[0].revents = 0;
+       
+    ret = poll(cli_list->client, cli_list->list_len  + 1, 0);
+    if(ret < 0)
+    continue;
+
     if (cli_list->client[0].revents & POLLIN)
     {
       if (check_connection(cli_list, listenfd) == -1)
@@ -363,17 +368,17 @@ int main (int argc, char *argv[])
       continue;
     }
     
-    if(cli_list->head == NULL)
+    if (cli_list->head == NULL)
       continue;
       
     client_info *cli_info = cli_list->head;  
     
-    while(cli_info)
+    while (cli_info)
     {     
      int cli_num;
      cli_num = cli_info->cli_num;
 
-      if (cli_list->client[cli_num].revents & POLLIN)
+      if (cli_list->client[cli_num].revents & (POLLIN | POLLRDNORM))
       {
         if (get_http_request(cli_info) == -1)
         {
@@ -383,6 +388,7 @@ int main (int argc, char *argv[])
         }
         if (parse_http_request(cli_info, s_info.dir_path) == -1)
         {
+          close_connection(cli_info, cli_list);
           fprintf(stderr,"Erro no parse request\n");
           break;
         }
@@ -390,35 +396,41 @@ int main (int argc, char *argv[])
         if ((cli_info->request_status = verify_path(cli_info->file_path))
                                                       == -1)
         {
+          close_connection(cli_info, cli_list);
           fprintf(stderr,"Erro no path\n");
           break;
         }
         
-     //talvez seja melhor colocar logo antes do envio do header      
         if (open_file(cli_info) == -1 || cli_info->request_status != OK)
         {
+          close_connection(cli_info, cli_list);
           fprintf(stderr, "File error:%s\n", strerror(errno));
           break;
         }
 
         cli_list->client[cli_num].events = POLLOUT;
-        cli_info = cli_info->next;               
+        //cli_info = cli_info->next;               
       }
 
-      if (cli_list->client[cli_num].revents == POLLOUT)
+      if (cli_list->client[cli_num].revents & POLLOUT)
       {
         if (cli_info->header_sent == false)
           send_http_response_header(cli_info);
         
-        if (cli_info->request_status == OK) 
-          if (send_requested_data(cli_info, get_filedata(cli_info))  == -1 || 
-                                feof(cli_info->fp))
+        //tem algum erro aqui
+        if ((send_requested_data(cli_info, get_filedata(cli_info))  == -1 || 
+                                 feof(cli_info->fp)) &&
+                                 cli_info->request_status == OK)
         {
         close_connection(cli_info, cli_list);
         break;
         }
-        cli_info = cli_info->next;       
-      }     
+      }
+
+      if (cli_list->client[cli_num].revents & (POLLERR | POLLHUP))
+        close_connection(cli_info, cli_list);
+          
+      cli_info = cli_info->next;       
     }  
   } 
 
