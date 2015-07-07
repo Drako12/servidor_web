@@ -15,15 +15,21 @@
 
 int parse_param(int n_params, char *dir_path, char *port,
                        struct server_info *s_info)
-{ 
+{  
   if(n_params != 3)
   {
-    fprintf(stderr, "Bad parameters\n");
+    fprintf(stderr, "Bad parameters\nUsage: server [DIR_PATH] [PORT]\n");
+    return -1;
+  }
+  s_info->port = atoi(port);
+  if(s_info->port > MAX_PORT)
+  {
+    fprintf(stderr, "Bad port\nPort Number has to be lower than 65535\n"
+                    "Usage: server [DIR_PATH] [PORT]\n");
     return -1;
   }
   strncpy(s_info->dir_path, dir_path, PATH_MAX);    
-  strncpy(s_info->port, port, MAX_PORT);
-
+  
   return 0;
 }
 
@@ -33,7 +39,7 @@ int server_start(const struct server_info *s_info)
   struct sockaddr_in addr;
   
   addr.sin_family = AF_INET;
-  addr.sin_port = htons(atoi(s_info->port));
+  addr.sin_port = htons(s_info->port);
   addr.sin_addr.s_addr = INADDR_ANY;
   
 
@@ -211,34 +217,35 @@ int get_http_request(client_info *cli_info, int sockfd)
   return 0;
 }
 
-int parse_http_request(client_info *cli_info, const char *dir_path)
-{
-  int ret;
-  char path[PATH_MAX];
-
-  strcpy(path, dir_path);
-  strcat(path, "/");
-
-  if ((ret = sscanf(cli_info->buffer, "%*[^ ] %s", path +
-                   strlen(path))) != 1)
-    return -1;
-  
-  realpath(path, cli_info->file_path); 
-    
-  return 0;
-}
-  
-int verify_path(const char *path)
+static int verify_request(const char *path, const char *realpath)
 {
   if (strstr(path, "../") != NULL)
-    return FORBIDDEN;  
-  if (access(path, R_OK) == 0)
+    return FORBIDDEN;    
+  if (access(realpath, R_OK) == 0)
     return OK;
   else
     return NOT_FOUND;
     
   return -1;
 }
+
+int parse_http_request(client_info *cli_info, const char *dir_path)
+{
+  int ret;
+  char path[PATH_MAX], method[MAX_METHOD_LEN];
+
+  strcpy(path, dir_path);
+  strcat(path, "/");
+
+  if ((ret = sscanf(cli_info->buffer, "%"STR_METHOD"s %"STR_PATH"s", method,
+                    path + strlen(path))) != 1)
+    return -1;
+  
+  realpath(path, cli_info->file_path); 
+  cli_info->request_status = verify_request(path, cli_info->file_path);
+    
+  return 0;
+} 
 
 int open_file(client_info *cli_info)
 {  

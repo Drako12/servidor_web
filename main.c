@@ -53,15 +53,7 @@ int main (int argc, char *argv[])
           fprintf(stderr,"Erro no parse request\n");
           break;
         }
-          
-        if ((cli_info->request_status = verify_path(cli_info->file_path))
-                                                      == -1)
-        {
-          close_connection(cli_info, &cli_list);
-          fprintf(stderr,"Erro no path\n");
-          break;
-        }
-        
+               
         if (open_file(cli_info) == -1 || cli_info->request_status != OK)
         {
           close_connection(cli_info, &cli_list);
