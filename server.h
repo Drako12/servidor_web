@@ -21,8 +21,10 @@
 #define HEADERSIZE 512
 #define MAX_CLIENTS 512
 #define MAX_PORT 65535
+#define MAX_PORT_LEN 6
 #define MAX_LISTEN 512
 #define MAX_METHOD_LEN 4
+#define SERVER_INDEX 0
 #define FORMAT(S) 
 #define RESOLVE(S) FORMAT(S) 
 #define STR_STATUS FORMAT(MAX_HTTP_STATUS_LEN)
@@ -47,7 +49,7 @@ typedef enum methods_
 struct server_info
 {
   char dir_path[PATH_MAX];
-  int port;
+  char port[MAX_PORT_LEN];
 };
 
 typedef struct client_info_
@@ -55,7 +57,6 @@ typedef struct client_info_
   char *buffer;
   char file_path[PATH_MAX];
   int request_status;
-  int cli_num;
   bool  header_sent;
   FILE *fp;
   struct client_info_ *next;
@@ -64,7 +65,6 @@ typedef struct client_info_
 
 typedef struct client_list_ 
 {
-  int max_i;
   int list_len; 
   struct pollfd client[MAX_CLIENTS];  
   client_info *head;
@@ -74,9 +74,10 @@ typedef struct client_list_
 int parse_param(int n_params, char *dir_path, char *port,
                 struct server_info *s_info);
 int server_start(const struct server_info *s_info);
-void server_struct_init(client_list *cli_list, int listenfd);
+void server_init(client_list *cli_list, int listenfd);
 void reset_poll(client_list *cli_list, int listenfd);
-void close_connection(client_info *cli_info, client_list *cli_list);
+void close_connection(client_info *cli_info, client_list *cli_list,
+                      int cli_num);
 int check_connection(client_list *cli_list, int listenfd);
 int get_http_request(client_info *cli_info, int sockfd);
 int parse_http_request(client_info *cli_info, const char *dir_path);

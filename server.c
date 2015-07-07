@@ -21,13 +21,16 @@ int parse_param(int n_params, char *dir_path, char *port,
     fprintf(stderr, "Bad parameters\nUsage: server [DIR_PATH] [PORT]\n");
     return -1;
   }
-  s_info->port = atoi(port);
-  if(s_info->port > MAX_PORT)
+
+  strncpy(s_info->port, port, MAX_PORT_LEN);    
+
+  if((atoi(s_info->port)) > MAX_PORT)
   {
     fprintf(stderr, "Bad port\nPort Number has to be lower than 65535\n"
                     "Usage: server [DIR_PATH] [PORT]\n");
     return -1;
   }
+
   strncpy(s_info->dir_path, dir_path, PATH_MAX);    
   
   return 0;
@@ -35,27 +38,39 @@ int parse_param(int n_params, char *dir_path, char *port,
 
 int server_start(const struct server_info *s_info)
 {
-  int yes = 1, listenfd = -1;
-  struct sockaddr_in addr;
+  int enable = 1, listenfd = -1, ret = 0;
+  struct addrinfo hints, *servinfo, *aux;
   
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(s_info->port);
-  addr.sin_addr.s_addr = INADDR_ANY;
-  
+  memset(&hints, 0, sizeof(hints));
 
-  if ((listenfd = socket(AF_INET, SOCK_STREAM, 0 )) == -1)
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_flags = AI_PASSIVE;
+    
+  if ((ret = getaddrinfo(NULL, s_info->port, &hints, &servinfo)) != 0)
   {
-    fprintf(stderr, "Socket error:%s\n",strerror(errno));
+    fprintf(stderr, "Getaddrinfo error: %s\n", gai_strerror(ret));
     return -1;
   }
   
-  setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
-
-  if (bind(listenfd, (struct sockaddr*)&addr, sizeof(addr)) == -1)
+ 
+  for (aux = servinfo; aux != NULL; aux = aux->ai_next)
   {
-    close (listenfd);
-    fprintf(stderr, "Bind error:%s\n",strerror(errno));
-    return -1;    
+    if ((listenfd = socket(aux->ai_family, aux->ai_socktype,
+                           aux->ai_protocol)) == -1)
+    {
+      fprintf(stderr, "Socket error: %s\n", strerror(errno));
+      continue;
+    }
+    
+    setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
+   
+    if (bind(listenfd, aux->ai_addr, aux->ai_addrlen) == -1)
+    {
+      close (listenfd);
+      fprintf(stderr, "Bind error:%s\n",strerror(errno));
+      continue;    
+    }
   }
 
   if (listen(listenfd, MAX_LISTEN) == -1)
@@ -64,15 +79,19 @@ int server_start(const struct server_info *s_info)
     return -1;    
   }
   
+  
   return listenfd;
 }
 
-void server_struct_init(client_list *cli_list, int listenfd)
+void server_init(client_list *cli_list, int listenfd)
 {
+  int i;
   memset(cli_list, 0, sizeof(*cli_list));   
-  memset(&cli_list->client, -1, sizeof(cli_list->client));
-  cli_list->client[0].fd = listenfd;
-  cli_list->client[0].events = POLLIN;
+  //memset(cli_list->client.fd, -1, sizeof(cli_list->client.fd));
+  cli_list->client[SERVER_INDEX].fd = listenfd;
+  cli_list->client[SERVER_INDEX].events = POLLIN;
+  for(i = SERVER_INDEX + 1; i <= MAX_CLIENTS; i++)
+    cli_list->client[i].fd = -1;
 }
 
 void reset_poll(client_list *cli_list, int listenfd)
@@ -82,13 +101,14 @@ void reset_poll(client_list *cli_list, int listenfd)
   cli_list->client[0].revents = 0;
 }
 
-static client_info *list_add(client_list *cli_list, int cli_num)
+static client_info *list_add(client_list *cli_list)
 {
   client_info *cli_info;
   
   cli_info = calloc(1, sizeof(*cli_info));
-  cli_info->next = NULL;
-  
+  if(cli_info == NULL)
+    return NULL;
+    
   if (cli_list->head == NULL)
   cli_list->head = cli_info;
   else
@@ -99,7 +119,6 @@ static client_info *list_add(client_list *cli_list, int cli_num)
     i->next = cli_info;
   }
   cli_list->list_len++;
-  cli_info->cli_num = cli_num;
   return cli_info; 
 }
 
@@ -110,23 +129,23 @@ int check_connection(client_list *cli_list, int listenfd)
   struct sockaddr_storage cli_addr;
     
     clilen = sizeof(cli_addr);
-    connfd = accept(listenfd, (struct sockaddr *)&cli_addr, &clilen);
+    if((connfd = accept(listenfd, (struct sockaddr *)&cli_addr,
+      &clilen)) == -1)
+    {
+      return -1;
+    }
     
-    for (i = 1; i < MAX_CLIENTS; i++)
+    for (i = SERVER_INDEX + 1; i < MAX_CLIENTS; i++)
     {
       if (cli_list->client[i].fd < 0)
       {
         cli_list->client[i].fd = connfd;
         cli_list->client[i].events = POLLIN;
-        if(!(list_add(cli_list, i)))
+        if(!(list_add(cli_list)))
           fprintf(stderr,"Add to list error");
         break;
       }
     }
-  
-  if (i > cli_list->max_i)
-    cli_list->max_i = i;
-
   return 0;
 }
 
@@ -163,15 +182,20 @@ static void list_del(client_info *cli_info, client_list *cli_list)
   }
   cli_list->list_len--;
 }
-
-void close_connection(client_info *cli_info,
-                      client_list *cli_list)
+static void shift_client_list(client_list *cli_list, int cli_num)
 {
-  int cli_num = cli_info->cli_num;
-  
+  memmove(&cli_list->client[cli_num], &cli_list->client[cli_num + 1],
+         (cli_list->list_len - cli_num) * sizeof(*cli_list->client));
+}
+
+void close_connection(client_info *cli_info, client_list *cli_list,
+                      int cli_num)
+{   
   clean_struct(cli_info);
   close(cli_list->client[cli_num].fd);
-  cli_list->client[cli_num].fd = -1;
+  shift_client_list(cli_list, cli_num);
+  memset(&cli_list->client[cli_list->list_len], 0, sizeof(*cli_list->client));
+  cli_list->client[cli_list->list_len].fd = -1;
   list_del(cli_info, cli_list);
 }
 
@@ -237,8 +261,8 @@ int parse_http_request(client_info *cli_info, const char *dir_path)
   strcpy(path, dir_path);
   strcat(path, "/");
 
-  if ((ret = sscanf(cli_info->buffer, "%"STR_METHOD"s %"STR_PATH"s", method,
-                    path + strlen(path))) != 1)
+  if ((ret = sscanf(cli_info->buffer, "%"STR_METHOD"s %"STR_PATH"s",
+                    method, path + strlen(path))) != 2)
     return -1;
   
   realpath(path, cli_info->file_path); 
@@ -305,7 +329,7 @@ int get_filedata(client_info *cli_info)
 {
   int num_bytes_read = 0;
  
-  num_bytes_read = fread(cli_info->buffer, 1, BUFSIZE, cli_info->fp);
+  num_bytes_read = fread(cli_info->buffer, 1, BUFSIZE, cli_info->fp);          
   if (num_bytes_read < 0)
   {
     fprintf(stderr,"erro no get_filedata %p\n%s,", cli_info->fp,
