@@ -1,32 +1,28 @@
-# Makefile dos projetos
+C = clang
+TARGET = server
+CFLAGS = -Wall -Wextra -g -I$(INCDIR)
+LFLAGS = 
+LINKER = clang -o
+SRCDIR = src
+OBJDIR = obj
+BINDIR = bin
+INCDIR = inc
 
-# Variavel que define o compilador
-CC = clang
+.PHONY: clean
 
-# Variavel de opcoes de compilacao e bibliotecas estaticas
-CFLAGS = -Werror -Wall -Wextra -pedantic -g 
+SOURCES  := $(wildcard $(SRCDIR)/*.c)
+INCLUDES := $(wildcard $(INCDIR)/*.h)
+OBJECTS  := $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
-# Variaveis de paths
-INCLUDE = ./include
-OBJ = ./obj
-VPATH = ./src
+$(BINDIR)/$(TARGET): $(OBJECTS) 
+	mkdir -p $(BINDIR)
+	$(CC) $(LFLAGS) -o $@ $(OBJECTS) 
 
-.PHONY: clean all
-
-REC_WEB_FILES = $(addprefix $(OBJ)/, client.o clienteweb.o)
-SERV_FILES = $(addprefix $(OBJ)/, server.o servidorweb.o token_bucket.o)
-
-all: clienteweb servidorweb 
-
-clienteweb: $(REC_WEB_FILES)
-	$(CC) $^ -o clienteweb
-
-servidorweb: $(SERV_FILES)
-	$(CC) $^ -o servidorweb
-
-# Gera os .o para o projeto
-$(OBJ)/%.o: %.c
-	$(CC) $(CFLAGS) -I$(INCLUDE) -c $^ -o $@
+$(OBJECTS): $(OBJDIR)/%.o : $(SRCDIR)/%.c
+	mkdir -p $(OBJDIR)	
+	$(CC) -c $(CFLAGS) $< -o $@	
 
 clean:
-	rm -f $(OBJ)/*.o clienteweb servidorweb
+	rm -rf $(OBJECTS) $(OBJDIR) $(BINDIR)/$(TARGET) $(BINDIR)
+
+	
