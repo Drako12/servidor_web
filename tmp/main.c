@@ -4,7 +4,6 @@ int main (int argc, char *argv[])
 {
   int listenfd;
   struct server_info s_info;
-  //bucket tbc;
   client_list cli_list;
   memset(&s_info, 0, sizeof(s_info));
 
@@ -22,7 +21,7 @@ int main (int argc, char *argv[])
     
     reset_poll(&cli_list, listenfd);
        
-    if ((ret = poll(cli_list.client, cli_list.list_len + 1 , 0)) < 0)
+    if((ret = poll(cli_list.client, cli_list.list_len + 1 , 0)) < 0)
       continue;
 
     if (cli_list.client[SERVER_INDEX].revents & POLLIN)
@@ -33,16 +32,14 @@ int main (int argc, char *argv[])
         
     while(cli_info)
     {     
-      int ret, cli_num; 
+      int cli_num; 
       cli_num = i;
 
       if (cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM))
       {
-        if ((ret = get_http_request(cli_list.client[cli_num].fd,
-                                    cli_info)) < 0)
+        if (get_http_request(cli_info, cli_list.client[cli_num].fd) == -1)
         {
-          if (ret == -1)
-            close_connection(cli_info, &cli_list, cli_num);
+          close_connection(cli_info, &cli_list, cli_num);
           break;
         }
 
@@ -62,16 +59,11 @@ int main (int argc, char *argv[])
       if (cli_list.client[cli_num].revents & POLLOUT)
       {
         if (cli_info->header_sent == false)
-        {
-          if (send_http_response_header(cli_list.client[cli_num].fd,
-                                                cli_info) == -1)
-            close_connection(cli_info, &cli_list, cli_num);         
-        }
+          send_http_response_header(cli_info, cli_list.client[cli_num].fd);
         else
-          if (send_requested_data(cli_info, get_filedata(cli_info),
-                                  cli_list.client[cli_num].fd) < 0)
-            close_connection(cli_info, &cli_list, cli_num);
-   
+          send_requested_data(cli_info, get_filedata(cli_info),
+                              cli_list.client[cli_num].fd);
+
         if (cli_info->request_status != OK || feof(cli_info->fp))
         {
           close_connection(cli_info, &cli_list, cli_num);

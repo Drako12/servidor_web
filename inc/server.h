@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <sys/time.h>
 #include <stdint.h>
+#include <fcntl.h>
 
 #define BUFSIZE BUFSIZ
 #define HEADERSIZE 512
@@ -89,13 +90,14 @@ void reset_poll(client_list *cli_list, int listenfd);
 void close_connection(client_info *cli_info, client_list *cli_list,
                       int cli_num);
 int check_connection(client_list *cli_list, int listenfd);
-int get_http_request(client_info *cli_info, int sockfd);
+int get_http_request(int sockfd, client_info *cli_info);
 int parse_http_request(client_info *cli_info, const char *dir_path);
 void open_file(client_info *cli_info);
-int send_http_response_header(client_info *cli_info, int sockfd);
+int send_http_response_header(int sockfd, client_info *cli_info);
 int get_filedata(client_info *cli_info);
 int send_requested_data(client_info *cli_info, int num_bytes_read, 
                         int sockfd);
+int set_nonblock(int sockfd);
 //int token_buffer_init(bucket *tbc, size_t max_burst, double rate);
 //size_t token_buffer_consume(bucket *tbc, size_t bytes);
 
