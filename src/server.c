@@ -14,7 +14,7 @@
  */
 
 int parse_param(int n_params, char *dir_path, char *port,
-                struct server_info *s_info)
+                  struct server_info *s_info)
 {  
   if (n_params != 3)
   {
@@ -36,14 +36,14 @@ int parse_param(int n_params, char *dir_path, char *port,
   return 0;
 }
 
-/*!
- * \brief Inicia o socket de escuta para o servidor e faz o bind ao endereco 
- *
- * \param[in] s_info Estrutura com a porta e o path do diretorio do servidor
- * 
- * \return listenfd socket de escuta do servidor, se OK
- * \return -1 se der algum erro
- */
+  /*!
+   * \brief Inicia o socket de escuta para o servidor e faz o bind ao endereco 
+   *
+   * \param[in] s_info Estrutura com a porta e o path do diretorio do servidor
+   * 
+   * \return listenfd socket de escuta do servidor, se OK
+   * \return -1 se der algum erro
+   */
 
 int server_start(const struct server_info *s_info)
 {
@@ -101,9 +101,43 @@ int server_start(const struct server_info *s_info)
  * no client armazena o socket de escuta do servidor
  */
 
-void server_init(client_list *cli_list, int listenfd)
+void server_init(client_list *cli_list, int listenfd,
+                 struct server_info *s_info)
 {
-  int i;
+  int i, ret, num_bytes_read = 0;
+  struct server_cache *cache; 
+  FILE *fp;
+
+  if ((s_info->dir = opendir("/home/diogo/files/")) != NULL)
+  {
+    while ((s_info->ent = readdir(s_info->dir)) != NULL)
+    {
+      if (s_info->ent->d_type == DT_REG)
+      {        
+        cache = calloc(1, sizeof(*cache));
+        
+        if(s_info->head == NULL)
+          s_info->head = cache;
+        strcpy(cache->filename, s_info->dir_path);
+        strcat(cache->filename, s_info->ent->d_name);
+        fp = fopen(cache->filename, "rb");
+        fseek(fp, 0, SEEK_END);
+        cache->file_size = ftell(fp);
+        rewind(fp);
+        cache->file = malloc(cache->file_size); 
+        
+        while(num_bytes_read < cache->file_size)
+        {
+          ret = fread(cache->file, 1, cache->file_size, fp);
+          num_bytes_read += ret;
+        }
+        cache = cache->next;
+      }
+    }    
+  } 
+  // fprintf(stderr,"%s\n", s_info->ent->d_name);
+   closedir(s_info->dir);
+     
   memset(cli_list, 0, sizeof(*cli_list));   
   cli_list->client[SERVER_INDEX].fd = listenfd;
   cli_list->client[SERVER_INDEX].events = POLLIN;
@@ -227,11 +261,11 @@ int check_connection(client_list *cli_list, int listenfd)
 }
 
 /*!
- * \brief Funcao para desalocar o buffer de um node e fechar o descritor de
- * arquivos
- *
- * param[out] cli_info Node atual
- */
+* \brief Funcao para desalocar o buffer de um node e fechar o descritor de
+* arquivos
+*
+* param[out] cli_info Node atual
+*/
 
 static void clean_struct(client_info *cli_info)
 { 
@@ -482,9 +516,10 @@ int get_filedata(client_info *cli_info)
 {
   int num_bytes_read = 0;
  
-  num_bytes_read = fread(cli_info->buffer, 1, BUFSIZE, cli_info->fp);          
-  if (num_bytes_read < 0)
-    return -1;
+ // num_bytes_read = fread(cli_info->buffer, 1, BUFSIZE, cli_info->fp);          
+ // if (num_bytes_read < 0)
+ //   return -1;
+  cli_info->buffer = s_info    
  
   return num_bytes_read;
 }
