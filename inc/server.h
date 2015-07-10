@@ -16,6 +16,10 @@
 #include <ctype.h>
 #include <limits.h>
 #include <stdbool.h>
+#include <sys/time.h>
+#include <stdint.h>
+#include <fcntl.h>
+#include <dirent.h>
 
 #define BUFSIZE BUFSIZ
 #define HEADERSIZE 512
@@ -46,19 +50,33 @@ typedef enum methods_
   PUT
 }methods;
 
-struct server_info
+typedef struct server_cache_
 {
+  int file_size;
+  char *file;
+  char filename[PATH_MAX];
+  struct  server_cache_ *next;
+} server_cache;
+
+typedef struct server_info_
+{
+  struct server_cache_ *head;
   char dir_path[PATH_MAX];
   char port[MAX_PORT_LEN];
-};
+  DIR *dir;
+  struct dirent *ent;
+} server_info;
+
 
 typedef struct client_info_
 {
   char *buffer;
+  char *header;
   char file_path[PATH_MAX];
   int request_status;
+  int bytes_sent;
   bool  header_sent;
-  FILE *fp;
+  //FILE *fp;
   struct client_info_ *next;
   methods method;
 } client_info;
@@ -70,21 +88,22 @@ typedef struct client_list_
   client_info *head;
 } client_list;
 
-
-int parse_param(int n_params, char *dir_path, char *port,
-                struct server_info *s_info);
-int server_start(const struct server_info *s_info);
-void server_init(client_list *cli_list, int listenfd);
+int parse_param(int n_params, char *dir_path, char *port, server_info *s_info);
+int server_start(const server_info *s_info);
+void server_init(client_list *cli_list, int listenfd, server_info *s_info);
 void reset_poll(client_list *cli_list, int listenfd);
 void close_connection(client_info *cli_info, client_list *cli_list,
                       int cli_num);
 int check_connection(client_list *cli_list, int listenfd);
-int get_http_request(client_info *cli_info, int sockfd);
+int get_http_request(int sockfd, client_info *cli_info);
 int parse_http_request(client_info *cli_info, const char *dir_path);
-int open_file(client_info *cli_info);
-int send_http_response_header(client_info *cli_info, int sockfd);
-int get_filedata(client_info *cli_info);
-int send_requested_data(client_info *cli_info, int num_bytes_read, 
-                        int sockfd);
+//void open_file(client_info *cli_info);
+int send_http_response_header(int sockfd, client_info *cli_info);
+//int get_filedata(client_info *cli_info);
+int send_requested_data(client_info *cli_info, server_cache *cache,
+                        int sockfd, server_info *s_info);
+int set_nonblock(int sockfd);
+//int token_buffer_init(bucket *tbc, size_t max_burst, double rate);
+//size_t token_buffer_consume(bucket *tbc, size_t bytes);
 
 #endif

@@ -3,7 +3,8 @@
 int main (int argc, char *argv[])
 {
   int listenfd;
-  struct server_info s_info;
+  server_info s_info;
+  //bucket tbc;
   client_list cli_list;
   memset(&s_info, 0, sizeof(s_info));
 
@@ -13,7 +14,7 @@ int main (int argc, char *argv[])
   if ((listenfd = server_start(&s_info)) == -1)
     return -1;
  
-  server_init(&cli_list, listenfd); 
+  server_init(&cli_list, listenfd, &s_info); 
     
   while (1)
   { 
@@ -21,7 +22,7 @@ int main (int argc, char *argv[])
     
     reset_poll(&cli_list, listenfd);
        
-    if((ret = poll(cli_list.client, cli_list.list_len + 1 , 0)) < 0)
+    if ((ret = poll(cli_list.client, cli_list.list_len + 1 , 0)) < 0)
       continue;
 
     if (cli_list.client[SERVER_INDEX].revents & POLLIN)
@@ -29,34 +30,32 @@ int main (int argc, char *argv[])
         continue;
           
     client_info *cli_info = cli_list.head;  
-        
+    server_cache *cache = s_info.head;
+    
     while(cli_info)
     {     
-     int cli_num; 
-     cli_num = i;
+      int ret, cli_num, sockfd; 
+      cli_num = i;
+      sockfd = cli_list.client[cli_num].fd;
 
       if (cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM))
       {
-        if (get_http_request(cli_info, cli_list.client[cli_num].fd) == -1)
+        if ((ret = get_http_request(sockfd, cli_info)) < 0)
         {
-          close_connection(cli_info, &cli_list, cli_num);
-          fprintf(stderr,"Erro no get request\n");
+          if (ret == -1)
+            close_connection(cli_info, &cli_list, cli_num);
           break;
         }
 
         if (parse_http_request(cli_info, s_info.dir_path) == -1)
         {
           close_connection(cli_info, &cli_list, cli_num);
-          fprintf(stderr,"Erro no parse request\n");
           break;
         }
-               
-        if (open_file(cli_info) == -1 || cli_info->request_status != OK)
-        {
-          close_connection(cli_info, &cli_list, cli_num);
-          fprintf(stderr, "File error:%s\n", strerror(errno));
-          break;
-        }
+       /*        
+        if (cli_info->request_status == OK)
+          open_file(cli_info); 
+       */
 
         cli_list.client[cli_num].events = POLLOUT;                       
       }
@@ -64,16 +63,24 @@ int main (int argc, char *argv[])
       if (cli_list.client[cli_num].revents & POLLOUT)
       {
         if (cli_info->header_sent == false)
-          send_http_response_header(cli_info, cli_list.client[cli_num].fd);
-                
-        if ((send_requested_data(cli_info, get_filedata(cli_info),
-                                 cli_list.client[cli_num].fd)  == -1 ||
-                                 feof(cli_info->fp)) &&
-                                 cli_info->request_status == OK)
         {
-        close_connection(cli_info, &cli_list, cli_num);
-        break;
+          if (send_http_response_header(sockfd, cli_info) == -1)
+            close_connection(cli_info, &cli_list, cli_num);         
         }
+        else
+          if (send_requested_data(cli_info, cache, sockfd, &s_info) == -1)
+            close_connection(cli_info, &cli_list, cli_num);
+          
+          //if (send_requested_data(cli_info, get_filedata(cli_info),
+          //                        sockfd) < 0)
+          //  close_connection(cli_info, &cli_list, cli_num);
+   
+        if (cli_info->request_status != OK || (cli_info->bytes_sent == 
+            cache->file_size)) //|| feof(cli_info->fp))
+        {
+          close_connection(cli_info, &cli_list, cli_num);
+          break;
+        }        
       }
 
       if (cli_list.client[cli_num].revents & (POLLERR | POLLHUP | POLLNVAL))

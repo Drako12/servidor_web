@@ -32,31 +32,26 @@ int main (int argc, char *argv[])
         
     while(cli_info)
     {     
-     int cli_num; 
-     cli_num = i;
+      int cli_num; 
+      cli_num = i;
 
       if (cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM))
       {
         if (get_http_request(cli_info, cli_list.client[cli_num].fd) == -1)
         {
           close_connection(cli_info, &cli_list, cli_num);
-          fprintf(stderr,"Erro no get request\n");
           break;
         }
 
         if (parse_http_request(cli_info, s_info.dir_path) == -1)
         {
           close_connection(cli_info, &cli_list, cli_num);
-          fprintf(stderr,"Erro no parse request\n");
           break;
         }
                
-        if (open_file(cli_info) == -1 || cli_info->request_status != OK)
-        {
-          close_connection(cli_info, &cli_list, cli_num);
-          fprintf(stderr, "File error:%s\n", strerror(errno));
-          break;
-        }
+        if (cli_info->request_status == OK)
+          open_file(cli_info); 
+
 
         cli_list.client[cli_num].events = POLLOUT;                       
       }
@@ -65,15 +60,15 @@ int main (int argc, char *argv[])
       {
         if (cli_info->header_sent == false)
           send_http_response_header(cli_info, cli_list.client[cli_num].fd);
-                
-        if ((send_requested_data(cli_info, get_filedata(cli_info),
-                                 cli_list.client[cli_num].fd)  == -1 ||
-                                 feof(cli_info->fp)) &&
-                                 cli_info->request_status == OK)
+        else
+          send_requested_data(cli_info, get_filedata(cli_info),
+                              cli_list.client[cli_num].fd);
+
+        if (cli_info->request_status != OK || feof(cli_info->fp))
         {
-        close_connection(cli_info, &cli_list, cli_num);
-        break;
-        }
+          close_connection(cli_info, &cli_list, cli_num);
+          break;
+        }        
       }
 
       if (cli_list.client[cli_num].revents & (POLLERR | POLLHUP | POLLNVAL))

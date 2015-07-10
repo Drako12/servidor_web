@@ -1,24 +1,28 @@
-CC = clang
+C = clang
 TARGET = server
-CFLAGS = -Wall -Wextra -g -I.
-LFLAGS = -Wall -I. -lm
+CFLAGS = -Wall -Wextra -g -I$(INCDIR)
+LFLAGS = 
 LINKER = clang -o
-SRCDIR = ./src
-OBJDIR = ./obj
-BINDIR = ./bin
-INCDIR = ./inc
+SRCDIR = src
+OBJDIR = obj
+BINDIR = bin
+INCDIR = inc
 
 .PHONY: clean
 
 SOURCES  := $(wildcard $(SRCDIR)/*.c)
-INCLUDES := $(wildcard $(SRCDIR)/*.h)
+INCLUDES := $(wildcard $(INCDIR)/*.h)
 OBJECTS  := $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
-$(BINDIR)/$(TARGET): $(OBJECTS)
-	$(LINKER) $@ $(LFLAGS) $(OBJECTS)
+$(BINDIR)/$(TARGET): $(OBJECTS) 
+	mkdir -p $(BINDIR)
+	$(CC) $(LFLAGS) -o $@ $(OBJECTS) 
 
 $(OBJECTS): $(OBJDIR)/%.o : $(SRCDIR)/%.c
-	$(CC) $(CFLAGS)-c $< -o $@
+	mkdir -p $(OBJDIR)	
+	$(CC) -c $(CFLAGS) $< -o $@	
 
 clean:
-	rm -f $(OBJECTS)
+	rm -rf $(OBJECTS) $(OBJDIR) $(BINDIR)/$(TARGET) $(BINDIR)
+
+	
