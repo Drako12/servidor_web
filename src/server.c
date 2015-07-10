@@ -13,8 +13,7 @@
  * \return -1 se der algum erro
  */
 
-int parse_param(int n_params, char *dir_path, char *port,
-                       struct server_info *s_info)
+int parse_param(int n_params, char *dir_path, char *port, server_info *s_info)
 {  
   if(n_params != 3)
   {
@@ -45,7 +44,7 @@ int parse_param(int n_params, char *dir_path, char *port,
  * \return -1 se der algum erro
  */
 
-int server_start(const struct server_info *s_info)
+int server_start(const server_info *s_info)
 {
   int enable = 1, listenfd = -1, ret = 0;
   struct addrinfo hints, *servinfo, *aux;
@@ -107,7 +106,7 @@ void server_init(client_list *cli_list, int listenfd)
   memset(cli_list, 0, sizeof(*cli_list));   
   cli_list->client[SERVER_INDEX].fd = listenfd;
   cli_list->client[SERVER_INDEX].events = POLLIN;
-  for(i = SERVER_INDEX + 1; i < MAX_CLIENTS; i++)
+  for (i = SERVER_INDEX + 1; i < MAX_CLIENTS; i++)
     cli_list->client[i].fd = -1;
 }
 
@@ -134,7 +133,7 @@ static client_info *list_add(client_list *cli_list)
   client_info *cli_info;
   
   cli_info = calloc(1, sizeof(*cli_info));
-  if(cli_info == NULL)
+  if (cli_info == NULL)
     return NULL;
     
   if (cli_list->head == NULL)
@@ -147,7 +146,37 @@ static client_info *list_add(client_list *cli_list)
     i->next = cli_info;
   }
   cli_list->list_len++;
+ 
   return cli_info; 
+}
+
+/*!
+ * \brief Realiza um shift para a esquerda da estrutura de clientes para
+ * deixar o vetor client paralelo a lista de clientes quando um node é deletado
+ *
+ * param[in] cli_num posicao do vetor client que foi deletada
+ * param[out] cli_list Lista de clientes
+ */
+
+static void shift_client_list(client_list *cli_list, int cli_num)
+{
+  memmove(&cli_list->client[cli_num], &cli_list->client[cli_num + 1],
+         (cli_list->list_len - cli_num) * sizeof(*cli_list->client));
+}
+/*!
+ * \brief Seta socket como nonblocking
+ *
+ * param[out] sockfd socket que sera setado como nonblock
+ */
+
+int set_nonblock(int sockfd)
+{
+  int flags;
+
+  if ((flags = fcntl(sockfd, F_GETFL, 0)) == -1)
+    flags = 0;
+               
+  return fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
 }
 
 /*!
@@ -170,20 +199,27 @@ int check_connection(client_list *cli_list, int listenfd)
     
     clilen = sizeof(cli_addr);
     if((connfd = accept(listenfd, (struct sockaddr *)&cli_addr,
-      &clilen)) == -1)
-    {
+                        &clilen)) == -1)
       return -1;
-    }
-    
+        
     for (i = SERVER_INDEX + 1; i < MAX_CLIENTS; i++)
     {
       if (cli_list->client[i].fd < 0)
       {
         cli_list->client[i].fd = connfd;
-        //fcntl(fd, F_GETFL, 0);
+        if ((set_nonblock(cli_list->client[i].fd)) == -1)
+        {
+          close(cli_list->client[i].fd);
+          shift_client_list(cli_list, i); // ou so seto fd = -1 ?
+          return -1;
+        }
         cli_list->client[i].events = POLLIN;
         if(!(list_add(cli_list)))
-          fprintf(stderr,"Add to list error");
+        { 
+          close(cli_list->client[i].fd);
+          shift_client_list(cli_list, i); 
+          return -1;
+        }
         break;
       }
     }
@@ -238,19 +274,6 @@ static void list_del(client_info *cli_info, client_list *cli_list)
   cli_list->list_len--;
 }
 
-/*!
- * \brief Realiza um shift para a esquerda da estrutura de clientes para
- * deixar o vetor client paralelo a lista de clientes quando um node é deletado
- *
- * param[in] cli_num posicao do vetor client que foi deletada
- * param[out] cli_list Lista de clientes
- */
-
-static void shift_client_list(client_list *cli_list, int cli_num)
-{
-  memmove(&cli_list->client[cli_num], &cli_list->client[cli_num + 1],
-         (cli_list->list_len - cli_num) * sizeof(*cli_list->client));
-}
 
 /*!
  * \brief Realiza as tarefas para fechar uma conexao, desaloca os recursos,
@@ -295,9 +318,15 @@ int get_http_request(client_info *cli_info, int sockfd)
     
   while (num_bytes_aux < BUFSIZE - 1)
   {   
-    num_bytes_read = recv(sockfd, cli_info->buffer +
-                          num_bytes_aux, BUFSIZE - num_bytes_aux - 1, 0);
-                         
+    if ((num_bytes_read = recv(sockfd, cli_info->buffer + num_bytes_aux,
+                               BUFSIZE - num_bytes_aux - 1, 0)) < 0)
+    {
+      if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
+        return -2;
+      else
+        return -1;
+    }
+
     if ((strstr(cli_info->buffer, "\r\n\r\n")) != NULL ||
        (strstr(cli_info->buffer, "\n\n")) != NULL)
     break;
@@ -321,14 +350,18 @@ int get_http_request(client_info *cli_info, int sockfd)
  * return status HTTP
  * return -1 se der algum erro
  */
-static int check_request(const char *realpath, const char *server_dir)
+
+int check_request(client_info *cli_info, server_info *s_info)
 {
-  if (strcmp(realpath, server_dir) < 0)
-    return FORBIDDEN;    
-  if (access(realpath, R_OK) == 0)
-    return OK;
+  if (strncmp(cli_info->file_path, s_info->dir_path, 
+              strlen(s_info->dir_path)) != 0)
+    return cli_info->request_status = FORBIDDEN;
+
+  if (access(cli_info->file_path, R_OK) == 0)
+    return cli_info->request_status = OK;
+
   else
-    return NOT_FOUND;
+    return cli_info->request_status = NOT_FOUND;
     
   return -1;
 }
@@ -356,7 +389,7 @@ int parse_http_request(client_info *cli_info, const char *dir_path)
     return -1;
   
   realpath(path, cli_info->file_path); 
-    
+  
   return 0;
 } 
 
@@ -420,17 +453,21 @@ static char *status_msg(const http_code status)
  * return 0 se tudo der certo 
  * return -1 se der algum erro
  */
-int send_http_response_header(client_info *cli_info, int sockfd)
+int send_http_response_header(client_info *cli_info, int sockfd, int status)
 {
   char response_msg[HEADERSIZE];
-  int status = cli_info->request_status;
-   
+    
     snprintf(response_msg, sizeof(response_msg), "HTTP/1.0 %d %s\r\n\r\n",
              status, status_msg(status));
 
-    if (send(sockfd, response_msg, strlen(response_msg), 0) < 0)
-      return -1;    
-  
+    if (send(sockfd, response_msg, strlen(response_msg), MSG_NOSIGNAL) < 0)
+    {
+      if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
+        return 0;
+      else
+        return -1;
+    }
+
   cli_info->header_sent = true;
   return 0;
 }
@@ -448,7 +485,8 @@ int get_filedata(client_info *cli_info)
 {
   int num_bytes_read = 0;
  
-  num_bytes_read = fread(cli_info->buffer, 1, BUFSIZE, cli_info->fp);          
+  num_bytes_read = fread(cli_info->buffer, 1, BUFSIZE - 1,
+                         cli_info->fp);          
   if (num_bytes_read < 0)
     return -1;
  
@@ -469,14 +507,16 @@ int send_requested_data(client_info *cli_info, int num_bytes_read,
                         int sockfd)
 {
   int ret;
-  ret = send(sockfd, cli_info->buffer, num_bytes_read, 0); 
+  ret = send(sockfd, cli_info->buffer, num_bytes_read, MSG_NOSIGNAL); 
+  
   if (ret < 0)
-  {
-    if(errno == ECONNRESET)
+  {  
+    if (errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN)
+      fseek(cli_info->fp, -num_bytes_read, SEEK_CUR);       
+    else 
       return -1;
-    else if(errno == EINTR)
-      fseek(cli_info->fp, -num_bytes_read, SEEK_CUR); 
+  }
 
- 
   return 0;
-}
+   
+ }

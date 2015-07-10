@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <sys/time.h>
 #include <stdint.h>
+#include <fcntl.h>
 
 #define BUFSIZE BUFSIZ
 #define HEADERSIZE 512
@@ -48,11 +49,11 @@ typedef enum methods_
   PUT
 }methods;
 
-struct server_info
+typedef struct server_info_
 {
   char dir_path[PATH_MAX];
   char port[MAX_PORT_LEN];
-};
+} server_info;
 
 typedef struct client_info_
 {
@@ -81,9 +82,8 @@ typedef struct client_list_
   int timestamp;
 } bucket;*/
 
-int parse_param(int n_params, char *dir_path, char *port,
-                struct server_info *s_info);
-int server_start(const struct server_info *s_info);
+int parse_param(int n_params, char *dir_path, char *port, server_info *s_info);
+int server_start(const server_info *s_info);
 void server_init(client_list *cli_list, int listenfd);
 void reset_poll(client_list *cli_list, int listenfd);
 void close_connection(client_info *cli_info, client_list *cli_list,
@@ -92,10 +92,12 @@ int check_connection(client_list *cli_list, int listenfd);
 int get_http_request(client_info *cli_info, int sockfd);
 int parse_http_request(client_info *cli_info, const char *dir_path);
 void open_file(client_info *cli_info);
-int send_http_response_header(client_info *cli_info, int sockfd);
+int send_http_response_header(client_info *cli_info, int sockfd, int status);
 int get_filedata(client_info *cli_info);
 int send_requested_data(client_info *cli_info, int num_bytes_read, 
                         int sockfd);
+int set_nonblock(int sockfd);
+int check_request(client_info *cli_info, server_info *s_info);
 //int token_buffer_init(bucket *tbc, size_t max_burst, double rate);
 //size_t token_buffer_consume(bucket *tbc, size_t bytes);
 
