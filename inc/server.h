@@ -90,7 +90,7 @@ typedef struct client_list_
 
 int parse_param(int n_params, char *dir_path, char *port, server_info *s_info);
 int server_start(const server_info *s_info);
-void server_init(client_list *cli_list, int listenfd, server_info *s_info);
+int server_init(client_list *cli_list, int listenfd, server_info *s_info);
 void reset_poll(client_list *cli_list, int listenfd);
 void close_connection(client_info *cli_info, client_list *cli_list,
                       int cli_num);

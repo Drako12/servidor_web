@@ -14,7 +14,8 @@ int main (int argc, char *argv[])
   if ((listenfd = server_start(&s_info)) == -1)
     return -1;
  
-  server_init(&cli_list, listenfd, &s_info); 
+  if (server_init(&cli_list, listenfd, &s_info) == -1)
+    return -1; 
     
   while (1)
   { 

@@ -91,18 +91,9 @@ int server_start(const server_info *s_info)
   return listenfd;
 }
 
-/*!
- * \brief Faz inicializacoes de variaveis na estrutura de clientes e do
- * servidor
- *
- * \param[in] listenfd Socket de escuta do servidor
- * \param[out] cli_list Estrutura de clientes, sendo que a posicao SERVER_INDEX
- * no client armazena o socket de escuta do servidor
- */
-
-void server_init(client_list *cli_list, int listenfd, server_info *s_info)
+static int load_cache(server_info *s_info)
 {
-  int i, ret, num_bytes_read = 0;
+  int ret, num_bytes_read = 0;
   server_cache *cache; 
   FILE *fp;
 
@@ -113,18 +104,28 @@ void server_init(client_list *cli_list, int listenfd, server_info *s_info)
       if (s_info->ent->d_type == DT_REG)
       {        
         cache = calloc(1, sizeof(*cache));
-        
-        if(s_info->head == NULL)
+        if (cache == NULL)
+          return -1;
+
+        if (s_info->head == NULL)
           s_info->head = cache;
         strcpy(cache->filename, s_info->dir_path);
         strcat(cache->filename, s_info->ent->d_name);
         fp = fopen(cache->filename, "rb");
+        if (fp == NULL)
+          return -1;
+        
         fseek(fp, 0, SEEK_END);
         cache->file_size = ftell(fp);
         rewind(fp);
         cache->file = malloc(cache->file_size); 
+        if (cache->file == NULL)
+        {
+          free(cache);
+          return -1;
+        }
         
-        while(num_bytes_read < cache->file_size)
+        while (num_bytes_read < cache->file_size)
         {
           ret = fread(cache->file, 1, cache->file_size, fp);
           num_bytes_read += ret;
@@ -133,14 +134,33 @@ void server_init(client_list *cli_list, int listenfd, server_info *s_info)
       }
     }    
   } 
-  // fprintf(stderr,"%s\n", s_info->ent->d_name);
-   closedir(s_info->dir);
-     
+  
+  closedir(s_info->dir);
+  return 0;
+}
+
+/*!
+ * \brief Faz inicializacoes de variaveis na estrutura de clientes e do
+ * servidor
+ *
+ * \param[in] listenfd Socket de escuta do servidor
+ * \param[out] cli_list Estrutura de clientes, sendo que a posicao SERVER_INDEX
+ * no client armazena o socket de escuta do servidor
+ */
+
+int  server_init(client_list *cli_list, int listenfd, server_info *s_info)
+{
+  int i = 0;
+  
+  if (load_cache(s_info) == -1)
+    return -1;    
   memset(cli_list, 0, sizeof(*cli_list));   
   cli_list->client[SERVER_INDEX].fd = listenfd;
   cli_list->client[SERVER_INDEX].events = POLLIN;
   for (i = SERVER_INDEX + 1; i < MAX_CLIENTS; i++)
     cli_list->client[i].fd = -1;
+
+  return 0;
 }
 
 //reset das configuracoes do poll na posicao do servidor
