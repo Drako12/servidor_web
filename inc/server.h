@@ -54,7 +54,7 @@ typedef struct server_cache_
 {
   int file_size;
   char *file;
-  char filename[PATH_MAX];
+  char file_path[PATH_MAX];
   struct  server_cache_ *next;
 } server_cache;
 
@@ -64,19 +64,17 @@ typedef struct server_info_
   char dir_path[PATH_MAX];
   char port[MAX_PORT_LEN];
   DIR *dir;
-  struct dirent *ent;
+  struct dirent *file;
 } server_info;
 
 
 typedef struct client_info_
 {
-  char *buffer;
   char *header;
   char file_path[PATH_MAX];
   int request_status;
   int bytes_sent;
   bool  header_sent;
-  //FILE *fp;
   struct client_info_ *next;
   methods method;
 } client_info;
@@ -97,9 +95,8 @@ void close_connection(client_info *cli_info, client_list *cli_list,
 int check_connection(client_list *cli_list, int listenfd);
 int get_http_request(int sockfd, client_info *cli_info);
 int parse_http_request(client_info *cli_info, const char *dir_path);
-//void open_file(client_info *cli_info);
-int send_http_response_header(int sockfd, client_info *cli_info);
-//int get_filedata(client_info *cli_info);
+int check_request(client_info *cli_info, server_info *s_info);
+int send_http_response_header(int sockfd, client_info *cli_info, int status);
 int send_requested_data(client_info *cli_info, server_cache *cache,
                         int sockfd, server_info *s_info);
 int set_nonblock(int sockfd);

@@ -14,7 +14,7 @@
  */
 
 int parse_param(int n_params, char *dir_path, char *port, server_info *s_info)
-{  
+{
   if (n_params != 3)
   {
     fprintf(stderr, "Bad parameters\nUsage: server [DIR_PATH] [PORT]\n");
@@ -29,9 +29,9 @@ int parse_param(int n_params, char *dir_path, char *port, server_info *s_info)
                     "Usage: server [DIR_PATH] [PORT]\n");
     return -1;
   }
-
-  strncpy(s_info->dir_path, dir_path, PATH_MAX);    
   
+  strncpy(s_info->dir_path, dir_path, PATH_MAX);    
+
   return 0;
 }
 
@@ -90,28 +90,48 @@ int server_start(const server_info *s_info)
   
   return listenfd;
 }
+static server_cache add(server_info *s_info)
+{
+  server_cache *cache;
+  
+  cache = calloc(1, sizeof(*cache));
+  if (cache == NULL)
+    return NULL;
+    
+  if (s_info->head == NULL)
+    s_info->head = cache;
+  else
+  {
+    server_cache *i = s_info->head;
+    while (i->next)
+      i = i->next;
+    i->next = cache;
+  }  
+  return cache; 
+  
+}
 
 static int load_cache(server_info *s_info)
 {
   int ret, num_bytes_read = 0;
+  char path[PATH_MAX];
   server_cache *cache; 
   FILE *fp;
 
   if ((s_info->dir = opendir(s_info->dir_path)) != NULL)
   {
-    while ((s_info->ent = readdir(s_info->dir)) != NULL)
+    while ((s_info->file = readdir(s_info->dir)) != NULL)
     {
-      if (s_info->ent->d_type == DT_REG)
+      if (s_info->file->d_type == DT_REG)
       {        
-        cache = calloc(1, sizeof(*cache));
-        if (cache == NULL)
+        if((cache = add(s_info)) == NULL)
           return -1;
-
-        if (s_info->head == NULL)
-          s_info->head = cache;
-        strcpy(cache->filename, s_info->dir_path);
-        strcat(cache->filename, s_info->ent->d_name);
-        fp = fopen(cache->filename, "rb");
+                
+        strcpy(path, s_info->dir_path);
+        strcat(path, "/");
+        strcat(path, s_info->file->d_name);
+        realpath(path, cache->file_path);
+        fp = fopen(cache->file_path, "rb");
         if (fp == NULL)
           return -1;
         
@@ -130,7 +150,8 @@ static int load_cache(server_info *s_info)
           ret = fread(cache->file, 1, cache->file_size, fp);
           num_bytes_read += ret;
         }
-        cache = cache->next;
+        cache = cache->next; 
+        num_bytes_read = 0;
       }
     }    
   } 
@@ -163,7 +184,9 @@ int  server_init(client_list *cli_list, int listenfd, server_info *s_info)
   return 0;
 }
 
-//reset das configuracoes do poll na posicao do servidor
+/* reset das configuracoes do poll na posicao do servidor
+ * nao sei se e necessario
+ */
 
 void reset_poll(client_list *cli_list, int listenfd)
 {
@@ -279,20 +302,6 @@ int check_connection(client_list *cli_list, int listenfd)
 }
 
 /*!
-* \brief Funcao para desalocar o buffer de um node e fechar o descritor de
-* arquivos
-*
-* param[out] cli_info Node atual
-*/
-/*
-static void clean_struct(client_info *cli_info)
-{ 
-  if (cli_info->fp)
-  fclose(cli_info->fp);
-  free(cli_info->header);
-}*/
-
-/*!
  * \brief Deleta um node da lista de clientes
  *
  * param[out] cli_list Lista de clientes
@@ -329,8 +338,8 @@ static void list_del(client_info *cli_info, client_list *cli_list)
 
 /*!
  * \brief Realiza as tarefas para fechar uma conexao, desaloca os recursos,
- * fecha os descritores/sockets, faz o shift do vetor de clientes, reseta as
- * estruturas e deleta o node da lista
+ * fecha os descritores/sockets, faz o shift do vetor de clientes, reseta a
+ * estrutura pollfd do cliente  e deleta o node da lista
  *
  * param[in] cli_num posicao do cliente na lista que sera removido
  * param[out] cli_list Lista de clientes
@@ -341,7 +350,6 @@ void close_connection(client_info *cli_info, client_list *cli_list,
                       int cli_num)
 {   
   free(cli_info->header);
-  //clean_struct(cli_info);
   close(cli_list->client[cli_num].fd);
   shift_client_list(cli_list, cli_num);
   memset(&cli_list->client[cli_list->list_len], 0, sizeof(*cli_list->client));
@@ -365,14 +373,14 @@ int get_http_request(int sockfd, client_info *cli_info)
   int num_bytes_read = 0;
   int num_bytes_aux = 0;
   
-  cli_info->header = (char *) calloc(BUFSIZE, sizeof(char));
+  cli_info->header = (char *) calloc(HEADERSIZE, sizeof(char));
   if (cli_info->header == NULL)
     return -1;
     
-  while (num_bytes_aux < BUFSIZE - 1)
+  while (num_bytes_aux < HEADERSIZE - 1)
   {   
     if ((num_bytes_read = recv(sockfd, cli_info->header + num_bytes_aux,
-                              BUFSIZE - num_bytes_aux - 1, 0)) < 0)
+                              HEADERSIZE - num_bytes_aux - 1, 0)) < 0)
     {
       if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
         return -2;
@@ -403,16 +411,19 @@ int get_http_request(int sockfd, client_info *cli_info)
  * return status HTTP
  * return -1 se der algum erro
  */
-static int check_request(const char *realpath, const char *server_dir)
-{
-  if (strcmp(realpath, server_dir) < 0)
-    return FORBIDDEN;    
-  if (access(realpath, R_OK) == 0)
-    return OK;
+
+int check_request(client_info *cli_info, server_info *s_info)
+{ 
+  if (memcmp(s_info->dir_path, cli_info->file_path, strlen(s_info->dir_path))
+             != 0)
+    return cli_info->request_status = FORBIDDEN;    
+
+  if (access(cli_info->file_path, R_OK) == 0)
+    return cli_info->request_status = OK;
   else
-    return NOT_FOUND;
-    
-  return -1;
+    return cli_info->request_status = NOT_FOUND;
+   
+  
 }
 
 /*!
@@ -425,37 +436,22 @@ static int check_request(const char *realpath, const char *server_dir)
  * return 0 se tudo der certo 
  * return -1 se der algum erro
  */
+
 int parse_http_request(client_info *cli_info, const char *dir_path)
 {
   int ret;
   char path[PATH_MAX], method[MAX_METHOD_LEN];
 
   strcpy(path, dir_path);
-  strcat(path, "/");
-
+  
   if ((ret = sscanf(cli_info->header, "%"STR_METHOD"s %"STR_PATH"s",
                     method, path + strlen(path))) != 2)
     return -1;
   
   realpath(path, cli_info->file_path); 
-  cli_info->request_status = check_request(path, dir_path);  
+    
   return 0;
 } 
-
-/*!
- * \brief Abre o arquivo de acordo com o path do node atual 
- *
- * param[out] cli_info Node atual
- */
-/*
-void open_file(client_info *cli_info)
-{  
-  cli_info->fp = fopen(cli_info->file_path, "rb");
-  if (cli_info->fp == NULL)
-    return -1;
-   
-  return 0;
-}*/
 
 /*!
  * \brief Funcao para transformar a mensagem de status em uma string  
@@ -502,10 +498,10 @@ static char *status_msg(const http_code status)
  * return 0 se tudo der certo ou o socket retornar erro
  * return -1 se der algum erro
  */
-int send_http_response_header(int sockfd, client_info *cli_info)
+int send_http_response_header(int sockfd, client_info *cli_info, int status)
 {
   char response_msg[HEADERSIZE];
-  int status = cli_info->request_status;
+ // int status = cli_info->request_status;
    
     snprintf(response_msg, sizeof(response_msg), "HTTP/1.0 %d %s\r\n\r\n",
              status, status_msg(status));
@@ -523,30 +519,11 @@ int send_http_response_header(int sockfd, client_info *cli_info)
 }
 
 /*!
- * \brief Armazena os dados do arquivo do path do node no buffer do node
- *
- * param[out] cli_info Node atual
- *
- * return 0 se tudo der certo 
- * return -1 se der algum erro
- */
-/*
-int get_filedata(client_info *cli_info)
-{
-  int num_bytes_read = 0;
- 
-  num_bytes_read = fread(cli_info->buffer, 1, BUFSIZE, cli_info->fp);          
-  if (num_bytes_read < 0)
-    return -1;
-  
-  return num_bytes_read;
-}*/
-
-/*!
- * \brief Envia os dados do buffer do node para o client conectado 
+ * \brief Envia os dados do buffer do node da lista de arquivos
+ * para o client conectado 
  *
  * param[in] cli_info Node atual
- * param[in] num_bytes_read numero de bytes lidos do arquivo
+ * param[in] server_cache lista de arquivos do servidor
  * param[in] sockfd socket do client conectado
  *
  * return 0 se tudo der certo 
@@ -557,25 +534,23 @@ int send_requested_data(client_info *cli_info, server_cache *cache,
                          int sockfd, server_info *s_info)
 {
   int ret = 0;
+
   cache = s_info->head;
   while (cache)
   {
-    if (strcmp(cache->filename, cli_info->file_path) == 0)  
+    if (strcmp(cache->file_path, cli_info->file_path) == 0)  
     {
-      cli_info->buffer = cache->file;
+      //cli_info->buffer = cache->file;
       if (cache->file_size < BUFSIZE + cli_info->bytes_sent)
-        ret = send(sockfd, cli_info->buffer + cli_info->bytes_sent, 
+        ret = send(sockfd, cache->file + cli_info->bytes_sent, 
                    cache->file_size - cli_info->bytes_sent, MSG_NOSIGNAL);
       else 
-      ret = send(sockfd, cli_info->buffer + cli_info->bytes_sent, BUFSIZE,
+        ret = send(sockfd, cache->file + cli_info->bytes_sent, BUFSIZE,
                  MSG_NOSIGNAL); 
       if (ret < 0)
       {
         if (errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN)
-        {
-        return 0; 
-        //fseek(cli_info->fp, -num_bytes_read, SEEK_CUR);       
-        }
+          return 0; 
         else
           return -1;
       }
@@ -586,23 +561,3 @@ int send_requested_data(client_info *cli_info, server_cache *cache,
   }
 return -1;
 }
-/*
-int send_requested_data(client_info *cli_info, int num_bytes_read, 
-                        int sockfd)
-{
-  int ret;
-  ret = send(sockfd, cli_info->buffer, num_bytes_read, MSG_NOSIGNAL); 
-  if (ret < 0)
-  {
-    if (errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN)
-    {
-      fprintf(stderr, "erro no socket\n%s", strerror(errno));
-      fseek(cli_info->fp, -num_bytes_read, SEEK_CUR);       
-    }
-    else 
-      return -1;
-  }
-
-  return 0;
-}*/
-

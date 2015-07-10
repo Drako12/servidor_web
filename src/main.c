@@ -53,10 +53,6 @@ int main (int argc, char *argv[])
           close_connection(cli_info, &cli_list, cli_num);
           break;
         }
-       /*        
-        if (cli_info->request_status == OK)
-          open_file(cli_info); 
-       */
 
         cli_list.client[cli_num].events = POLLOUT;                       
       }
@@ -65,23 +61,17 @@ int main (int argc, char *argv[])
       {
         if (cli_info->header_sent == false)
         {
-          if (send_http_response_header(sockfd, cli_info) == -1)
+          if (send_http_response_header(sockfd, cli_info,
+                                        check_request(cli_info, &s_info)) == -1)
             close_connection(cli_info, &cli_list, cli_num);         
         }
         else
           if (send_requested_data(cli_info, cache, sockfd, &s_info) == -1)
             close_connection(cli_info, &cli_list, cli_num);
-          
-          //if (send_requested_data(cli_info, get_filedata(cli_info),
-          //                        sockfd) < 0)
-          //  close_connection(cli_info, &cli_list, cli_num);
-   
+        
         if (cli_info->request_status != OK || (cli_info->bytes_sent == 
-            cache->file_size)) //|| feof(cli_info->fp))
-        {
+            cache->file_size)) 
           close_connection(cli_info, &cli_list, cli_num);
-          break;
-        }        
       }
 
       if (cli_list.client[cli_num].revents & (POLLERR | POLLHUP | POLLNVAL))
