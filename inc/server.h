@@ -49,6 +49,14 @@ typedef enum methods_
   PUT
 }methods;
 
+typedef struct token_bucket
+{
+  double capacity;
+  double tokens;
+  double rate;
+  int timestamp;
+} bucket;
+
 typedef struct server_info_
 {
   char dir_path[PATH_MAX];
@@ -64,7 +72,7 @@ typedef struct client_info_
   FILE *fp;
   struct client_info_ *next;
   methods method;
-  //bucket tbc;
+  bucket tbc;
 } client_info;
 
 typedef struct client_list_ 
@@ -74,13 +82,6 @@ typedef struct client_list_
   client_info *head;
 } client_list;
 
-/*typedef struct token_bucket
-{
-  size_t capacity;
-  size_t tokens;
-  double rate;
-  int timestamp;
-} bucket;*/
 
 int parse_param(int n_params, char *dir_path, char *port, server_info *s_info);
 int server_start(const server_info *s_info);
