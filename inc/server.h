@@ -53,6 +53,7 @@ typedef struct token_bucket
 {
   double capacity;
   double tokens;
+  double tokens_aux;
   double rate;
   long timestamp;
 } bucket;
@@ -68,7 +69,8 @@ typedef struct client_info_
   char *buffer;
   char file_path[PATH_MAX];
   int request_status;
-  bool  header_sent;
+  bool header_sent;
+  bool can_send;
   FILE *fp;
   struct client_info_ *next;
   methods method;
@@ -95,13 +97,14 @@ int parse_http_request(client_info *cli_info, const char *dir_path);
 void open_file(client_info *cli_info);
 int send_http_response_header(client_info *cli_info, int sockfd, int status);
 int get_filedata(client_info *cli_info);
-int send_requested_data(client_info *cli_info, int num_bytes_read, 
-                        int sockfd);
+int send_requested_data(client_info *cli_info, int sockfd);
 int set_nonblock(int sockfd);
 int check_request(client_info *cli_info, server_info *s_info);
-int token_buffer_init(client_info *cli_info, double tokens, double max_burst,
+int token_buffer_init(bucket *tbc, double tokens, double max_burst,
                       double rate);
-bool token_buffer_consume(bucket *tbc, double tokens);
-long wait_time(bucket *tbc, double tokens);
+void token_buffer_consume(bucket *tbc);
+long wait_time(bucket *tbc);
+bool check_for_consume(bucket *tbc);
+long find_poll_wait_time(client_list *cli_list);
 
 #endif

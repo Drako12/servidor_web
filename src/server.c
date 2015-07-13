@@ -146,7 +146,9 @@ static client_info *list_add(client_list *cli_list)
   }
   cli_list->list_len++;
 
-  token_buffer_init(cli_info, 100, 100, 5);
+  cli_info->can_send = true;
+
+  token_buffer_init(&cli_info->tbc, 10000, 10000, 5000);
   return cli_info; 
 }
 
@@ -204,7 +206,7 @@ int check_connection(client_list *cli_list, int listenfd)
         
     for (i = SERVER_INDEX + 1; i < MAX_CLIENTS; i++)
     {
-      if (cli_list->client[i].fd < 0)
+      if (cli_list->client[i].fd == -1)
       {
         cli_list->client[i].fd = connfd;
         if ((set_nonblock(cli_list->client[i].fd)) == -1)
@@ -273,7 +275,6 @@ static void list_del(client_info *cli_info, client_list *cli_list)
   }
   cli_list->list_len--;
 }
-
 
 /*!
  * \brief Realiza as tarefas para fechar uma conexao, desaloca os recursos,
@@ -503,20 +504,21 @@ int get_filedata(client_info *cli_info)
  * return 0 se tudo der certo 
  * return -1 se der algum erro
  */
-int send_requested_data(client_info *cli_info, int num_bytes_read, 
-                        int sockfd)
+int send_requested_data(client_info *cli_info, int sockfd)
 {
   int ret;
-  ret = send(sockfd, cli_info->buffer, num_bytes_read, MSG_NOSIGNAL); 
+  ret = send(sockfd, cli_info->buffer, cli_info->tbc.tokens_aux, MSG_NOSIGNAL); 
   
   if (ret < 0)
   {  
     if (errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN)
-      fseek(cli_info->fp, -num_bytes_read, SEEK_CUR);       
+      return 0; //fseek(cli_info->fp, -cli_info->tbc.tokens_aux, SEEK_CUR);       
     else 
       return -1;
   }
 
+  cli_info->tbc.tokens_aux = 0;
+  
   return 0;
    
  }

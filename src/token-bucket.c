@@ -17,51 +17,97 @@ static void refill_tokens(bucket *tbc)
   {
     double new_tokens;
     
-    new_tokens = delta * tbc->rate;
+    new_tokens = delta * tbc->rate * 0.001;
     
     if (tbc->tokens + new_tokens < tbc->capacity)
       tbc->tokens = tbc->tokens + new_tokens;
     else
       tbc->tokens = tbc->capacity;
-  } 
-  
+  }  
   tbc->timestamp = now;
-
 }
 
-int token_buffer_init(client_info *cli_info, double tokens, double max_burst, double rate)
+int token_buffer_init(bucket *tbc, double tokens, double max_burst, double rate)
 {
-  cli_info->tbc.capacity = max_burst;
-  cli_info->tbc.tokens = tokens;
-  cli_info->tbc.rate = rate;
-  cli_info->tbc.timestamp = time_now();
-  
+  tbc->capacity = max_burst;
+  tbc->tokens = tokens;
+  tbc->rate = rate;
+  tbc->timestamp = time_now();  
+
   return 0;
 }
 
-bool token_buffer_consume(bucket *tbc, double tokens)
+void token_buffer_consume(bucket *tbc)
+{
+  refill_tokens(tbc);
+    
+ // if (tbc->tokens < tbc->tokens_aux)
+ //  return false;
+
+  tbc->tokens -= tbc->tokens_aux; 
+ // return true;
+}
+
+bool check_for_consume(bucket *tbc)
 {
   refill_tokens(tbc);
  
-  if (tbc->tokens < tokens)
+  if (tbc->tokens < tbc->tokens_aux)
    return false;
 
-  tbc->tokens -= tokens; 
-                 
+  //tbc->tokens -= tokens_aux; 
   return true;
 }
 
-long wait_time(bucket *tbc, double tokens)
+
+long wait_time(bucket *tbc)
 {
-  double tokens_needed, t_wait;
+  double tokens_needed;
+  long t_wait;
   refill_tokens(tbc);
   
-  if (tbc->tokens >= tokens)
+  if (tbc->tokens >= tbc->tokens_aux)
     return 0;
     
-  tokens_needed = tokens - tbc->tokens;
+  tokens_needed = tbc->tokens_aux - tbc->tokens;
   t_wait = (1000 * tokens_needed) / tbc->rate;
-  //t_wait += ((1000 * tokens_needed) % tbc->rate) ? 1 : 0;
   return t_wait;
 
 }
+
+long find_poll_wait_time(client_list *cli_list)
+{
+  int i;
+  long wait = 0;
+  client_info *cli_info; 
+
+  i = SERVER_INDEX + 1;
+ 
+  cli_info = cli_list->head;  
+    
+  while (cli_info)
+  {
+    if (cli_info->can_send == false && cli_list->client[i].fd > 0)
+    {
+      cli_list->client[i].fd = cli_list->client[i].fd * -1;
+      if (wait == 0) 
+        wait = wait_time(&cli_info->tbc) * 1000;
+      if (wait_time(&cli_info->tbc) * 1000 < wait)
+        wait = wait_time(&cli_info->tbc) * 1000;        
+      break;    
+    }
+
+    if (check_for_consume(&cli_info->tbc) == true &&
+                          cli_list->client[i].fd < 0)  
+    {
+      cli_list->client[i].fd = cli_list->client[i].fd * -1;
+      break;
+    }
+                
+    cli_info = cli_info->next;
+    i++;
+  }
+
+  return wait;
+}
+

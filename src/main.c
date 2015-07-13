@@ -5,6 +5,7 @@ int main (int argc, char *argv[])
   int listenfd;
   server_info s_info;
   client_list cli_list;
+  client_info *cli_info = NULL;  
   memset(&s_info, 0, sizeof(s_info));
 
   if (parse_param(argc, argv[1], argv[2], &s_info) == -1)
@@ -17,22 +18,25 @@ int main (int argc, char *argv[])
     
   while (1)
   { 
-    int ret, i = SERVER_INDEX + 1;
-    
+    int i,ret;
+    long wait = 0;
+     
     reset_poll(&cli_list, listenfd);
-       
-    if ((ret = poll(cli_list.client, cli_list.list_len + 1 , 0)) < 0)
+    wait = find_poll_wait_time(&cli_list);
+
+    if ((ret = poll(cli_list.client, cli_list.list_len + 1 , wait)) < 0)
       continue;
 
     if (cli_list.client[SERVER_INDEX].revents & POLLIN)
       if (check_connection(&cli_list, listenfd) == -1 || --ret <= 0)
         continue;
           
-    client_info *cli_info = cli_list.head;  
-        
+    cli_info = cli_list.head;  
+    i = SERVER_INDEX + 1;
+
     while(cli_info)
     {     
-      int ret, cli_num, sockfd; 
+      int sockfd, ret, cli_num; 
       cli_num = i;
       sockfd = cli_list.client[cli_num].fd;
 
@@ -60,7 +64,7 @@ int main (int argc, char *argv[])
         if (cli_info->header_sent == false)
         {
           if (send_http_response_header(cli_info, sockfd,
-                                        check_request(cli_info, &s_info)) == -1)
+                                       check_request(cli_info, &s_info)) == -1)
           {
             close_connection(cli_info, &cli_list, cli_num);
             break;
@@ -76,21 +80,22 @@ int main (int argc, char *argv[])
         }    
         else
         {
-          long tokens;
-          tokens = get_filedata(cli_info);
-          
-          while (token_buffer_consume(cli_info, tokens) == false)
+
+          if(cli_info->tbc.tokens_aux == 0)
+            cli_info->tbc.tokens_aux = get_filedata(cli_info);
+
+          cli_info->can_send = check_for_consume(&cli_info->tbc);
+               
+          if (cli_info->can_send == true)                                   
           {
-          usleep(wait_time(cli_info, tokens) * 1000);
-          }
-                         
-          if ((send_requested_data(cli_info, get_filedata(cli_info),
-                                   sockfd)) == -1)
-          {
-            close_connection(cli_info, &cli_list, cli_num);
-            break;
-          }
+            token_buffer_consume(&cli_info->tbc);
+            if ((send_requested_data(cli_info, sockfd)) == -1)
+            {
+              close_connection(cli_info, &cli_list, cli_num);
+              break;
+            }
           
+          }
           if (feof(cli_info->fp))
           {
             close_connection(cli_info, &cli_list, cli_num);
