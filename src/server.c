@@ -114,9 +114,9 @@ void server_init(client_list *cli_list, int listenfd)
 
 void reset_poll(client_list *cli_list, int listenfd)
 {
-  cli_list->client[0].fd = listenfd;
-  cli_list->client[0].events = POLLIN;
-  cli_list->client[0].revents = 0;
+  cli_list->client[SERVER_INDEX].fd = listenfd;
+  cli_list->client[SERVER_INDEX].events = POLLIN;
+  cli_list->client[SERVER_INDEX].revents = 0;
 }
 
 /*!
@@ -134,8 +134,7 @@ static client_info *list_add(client_list *cli_list)
   
   cli_info = calloc(1, sizeof(*cli_info));
   if (cli_info == NULL)
-    return NULL;
-    
+    return NULL;    
   if (cli_list->head == NULL)
   cli_list->head = cli_info;
   else
@@ -146,7 +145,8 @@ static client_info *list_add(client_list *cli_list)
     i->next = cli_info;
   }
   cli_list->list_len++;
- 
+
+  token_buffer_init(cli_info, 100, 100, 5);
   return cli_info; 
 }
 

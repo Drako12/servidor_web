@@ -61,21 +61,42 @@ int main (int argc, char *argv[])
         {
           if (send_http_response_header(cli_info, sockfd,
                                         check_request(cli_info, &s_info)) == -1)
+          {
             close_connection(cli_info, &cli_list, cli_num);
+            break;
+          }
           
           if (cli_info->request_status != OK)
+          {
             close_connection(cli_info, &cli_list, cli_num);
+            break;
+          }
           else
             open_file(cli_info); 
         }    
         else
         {
+          long tokens;
+          tokens = get_filedata(cli_info);
+          
+          while (token_buffer_consume(cli_info, tokens) == false)
+          {
+          usleep(wait_time(cli_info, tokens) * 1000);
+          }
+                         
           if ((send_requested_data(cli_info, get_filedata(cli_info),
-                                  sockfd)) == -1) 
+                                   sockfd)) == -1)
+          {
             close_connection(cli_info, &cli_list, cli_num);
+            break;
+          }
           
           if (feof(cli_info->fp))
+          {
             close_connection(cli_info, &cli_list, cli_num);
+            break;
+          }
+          
         }
       }
 

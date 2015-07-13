@@ -54,7 +54,7 @@ typedef struct token_bucket
   double capacity;
   double tokens;
   double rate;
-  int timestamp;
+  long timestamp;
 } bucket;
 
 typedef struct server_info_
@@ -99,7 +99,9 @@ int send_requested_data(client_info *cli_info, int num_bytes_read,
                         int sockfd);
 int set_nonblock(int sockfd);
 int check_request(client_info *cli_info, server_info *s_info);
-//int token_buffer_init(bucket *tbc, size_t max_burst, double rate);
-//size_t token_buffer_consume(bucket *tbc, size_t bytes);
+int token_buffer_init(client_info *cli_info, double tokens, double max_burst,
+                      double rate);
+bool token_buffer_consume(bucket *tbc, double tokens);
+long wait_time(bucket *tbc, double tokens);
 
 #endif
