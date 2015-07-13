@@ -37,15 +37,15 @@ int token_buffer_init(bucket *tbc, double tokens, double max_burst, double rate)
   return 0;
 }
 
-void token_buffer_consume(bucket *tbc)
+bool token_buffer_consume(bucket *tbc)
 {
   refill_tokens(tbc);
     
- // if (tbc->tokens < tbc->tokens_aux)
- //  return false;
+  if (tbc->tokens < tbc->tokens_aux)
+    return false;
 
   tbc->tokens -= tbc->tokens_aux; 
- // return true;
+    return true;
 }
 
 bool check_for_consume(bucket *tbc)
@@ -87,13 +87,16 @@ long find_poll_wait_time(client_list *cli_list)
     
   while (cli_info)
   {
+
     if (cli_info->can_send == false && cli_list->client[i].fd > 0)
     {
       cli_list->client[i].fd = cli_list->client[i].fd * -1;
+      
       if (wait == 0) 
         wait = wait_time(&cli_info->tbc) * 1000;
       if (wait_time(&cli_info->tbc) * 1000 < wait)
         wait = wait_time(&cli_info->tbc) * 1000;        
+     
       break;    
     }
 

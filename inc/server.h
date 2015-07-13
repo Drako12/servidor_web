@@ -102,7 +102,7 @@ int set_nonblock(int sockfd);
 int check_request(client_info *cli_info, server_info *s_info);
 int token_buffer_init(bucket *tbc, double tokens, double max_burst,
                       double rate);
-void token_buffer_consume(bucket *tbc);
+bool token_buffer_consume(bucket *tbc);
 long wait_time(bucket *tbc);
 bool check_for_consume(bucket *tbc);
 long find_poll_wait_time(client_list *cli_list);

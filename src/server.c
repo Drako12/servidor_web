@@ -148,7 +148,7 @@ static client_info *list_add(client_list *cli_list)
 
   cli_info->can_send = true;
 
-  token_buffer_init(&cli_info->tbc, 10000, 10000, 5000);
+  token_buffer_init(&cli_info->tbc, 50000, 50000, 10000);
   return cli_info; 
 }
 
