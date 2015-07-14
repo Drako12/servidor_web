@@ -11,7 +11,7 @@ static long time_now()
 static void refill_tokens(bucket *tbc)
 {
   long now = time_now();
-  size_t delta = (size_t)(tbc->rate * (now - tbc->timestamp));
+  size_t delta = (size_t)(now - tbc->timestamp);
   
   if (tbc->tokens < tbc->capacity)
   {
@@ -100,8 +100,8 @@ long find_poll_wait_time(client_list *cli_list)
       break;    
     }
 
-    if (check_for_consume(&cli_info->tbc) == true &&
-                          cli_list->client[i].fd < 0)  
+    if ((cli_info->can_send = check_for_consume(&cli_info->tbc)) == true &&
+                                                cli_list->client[i].fd < 0)  
     {
       cli_list->client[i].fd = cli_list->client[i].fd * -1;
       break;

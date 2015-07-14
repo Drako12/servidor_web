@@ -79,19 +79,21 @@ int main(int argc, char *argv[])
         }    
         else
         {
-          if (cli_info->tbc.tokens_aux == 0)
-            cli_info->tbc.tokens_aux = get_filedata(cli_info);
+         // if (cli_info->tbc.tokens_aux == 0)
 
           //cli_info->can_send = check_for_consume(&cli_info->tbc);
                
           if (cli_info->can_send == true)                                   
           {
+            cli_info->tbc.tokens_aux = get_filedata(cli_info);
             cli_info->can_send = token_buffer_consume(&cli_info->tbc);
-            if ((send_requested_data(cli_info, sockfd)) == -1)
-            {
-              close_connection(cli_info, &cli_list, cli_num);
-              break;
-            }
+            
+            if(cli_info->can_send == true)
+              if ((send_requested_data(cli_info, sockfd)) == -1)
+              {
+                close_connection(cli_info, &cli_list, cli_num);
+                break;
+              }
           
           }
           if (feof(cli_info->fp))
