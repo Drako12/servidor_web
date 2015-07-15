@@ -157,7 +157,7 @@ static client_info *list_add(client_list *cli_list, long rate)
 
   cli_info->can_send = true;
 
-  token_buffer_init(&cli_info->tbc, 50000, 50000, rate);
+  token_buffer_init(&cli_info->tbc, 0, 50000, rate);
   return cli_info; 
 }
 
@@ -202,7 +202,7 @@ int set_nonblock(int sockfd)
  * return -1 se der algum erro
  */
 
-int check_connection(client_list *cli_list, int listenfd, double rate)
+int check_connection(client_list *cli_list, int listenfd, int rate)
 {
   int i, connfd;
   socklen_t clilen;
@@ -317,7 +317,7 @@ void close_connection(client_info *cli_info, client_list *cli_list,
  * return -1 se der algum erro
  */
 
-int get_http_request(client_info *cli_info, int sockfd)
+static int get_http_request(client_info *cli_info, int sockfd)
 {     
   int num_bytes_read = 0;
   int num_bytes_aux = 0;
@@ -386,7 +386,7 @@ int check_request(client_info *cli_info, server_info *s_info)
  * return 0 se tudo der certo 
  * return -1 se der algum erro
  */
-int parse_http_request(client_info *cli_info, const char *dir_path)
+static int parse_http_request(client_info *cli_info, const char *dir_path)
 {
   int ret;
   char path[PATH_MAX], method[MAX_METHOD_LEN];
@@ -403,6 +403,35 @@ int parse_http_request(client_info *cli_info, const char *dir_path)
   return 0;
 } 
 
+
+/*!
+ * \brief Faz o processamento do request HTTP 
+ *
+ * param[in] sockfd socket connectado
+ * param[in] cli_info Node atual
+ * param[in] dir_path path do diretorio raiz do servidor
+ *
+ * return ret 0 para tudo ok, -1 para erro no request -2 caso socket esteja
+ * vazio
+ * 
+ */
+
+int process_http_request(client_info *cli_info, const char *dir_path,
+                         int sockfd)
+{ 
+  int ret;
+  
+  ret = get_http_request(cli_info, sockfd);
+  
+  if (ret == -1)
+    return ret;
+  
+  if (ret == 0)  
+    return parse_http_request(cli_info, dir_path);
+
+  return ret;
+}
+
 /*!
  * \brief Abre o arquivo de acordo com o path do node atual 
  *
@@ -414,7 +443,6 @@ void open_file(client_info *cli_info)
   cli_info->fp = fopen(cli_info->file_path, "rb");
   //if (cli_info->fp == NULL)
   //  return -1;
-   
 //  return 0;
 }
 
@@ -454,6 +482,7 @@ static char *status_msg(const http_code status)
   return NULL;
 }
 
+
 /*!
  * \brief Envia o header da mensagem de resposta de uma conexao
  *
@@ -463,7 +492,7 @@ static char *status_msg(const http_code status)
  * return 0 se tudo der certo 
  * return -1 se der algum erro
  */
-int send_http_response(client_info *cli_info, int sockfd, int status)
+static int send_http_response(client_info *cli_info, int sockfd, int status)
 {
   char response_msg[HEADERSIZE];
     
@@ -491,7 +520,7 @@ int send_http_response(client_info *cli_info, int sockfd, int status)
  * return -1 se der algum erro
  */
 
-int get_filedata(client_info *cli_info)
+static int get_filedata(client_info *cli_info)
 {
   int num_bytes_read = 0;
  
@@ -513,7 +542,7 @@ int get_filedata(client_info *cli_info)
  * return 0 se tudo der certo 
  * return -1 se der algum erro
  */
-int send_requested_data(client_info *cli_info, int sockfd)
+static int send_requested_data(client_info *cli_info, int sockfd)
 {
   int ret;
   ret = send(sockfd, cli_info->buffer, cli_info->tbc.tokens_aux, MSG_NOSIGNAL); 
@@ -530,4 +559,38 @@ int send_requested_data(client_info *cli_info, int sockfd)
   
   return 0;
    
- }
+}
+
+int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
+                                 int sockfd)
+{
+  int ret;
+
+  if (cli_info->header_sent == false)
+  {
+    ret = send_http_response(cli_info, sockfd, check_request(cli_info, s_info));
+    if (ret == -1 || cli_info->request_status != OK)
+      return ret;
+
+    open_file(cli_info);
+  }  
+  else
+  {         
+    cli_info->can_send = check_for_consume(&cli_info->tbc);
+         
+    if (cli_info->can_send == true)                                   
+    {                        
+      cli_info->tbc.tokens_aux = get_filedata(cli_info);
+      token_buffer_consume(&cli_info->tbc, cli_info->tbc.tokens_aux);
+      
+      ret = send_requested_data(cli_info, sockfd);
+      if (ret == -1)
+        return ret;    
+    }
+
+    if (feof(cli_info->fp))
+      return -1;          
+  }
+
+return 0;  
+}

@@ -26,7 +26,7 @@ static void refill_tokens(bucket *tbc)
   
   if (tbc->tokens < tbc->capacity)
   {
-    double new_tokens;
+    int new_tokens;
     
     new_tokens = delta * tbc->rate * 0.001;
     
@@ -47,7 +47,7 @@ static void refill_tokens(bucket *tbc)
  * 
  */
 
-void token_buffer_init(bucket *tbc, double tokens, double capacity, double rate)
+void token_buffer_init(bucket *tbc, int tokens, int capacity, int rate)
 {
   tbc->capacity = capacity;
   tbc->tokens = tokens;
@@ -64,7 +64,7 @@ void token_buffer_init(bucket *tbc, double tokens, double capacity, double rate)
  * \return false se nao tiver saldo suficiente para consumir
  */
 
-bool token_buffer_consume(bucket *tbc, double tokens)
+bool token_buffer_consume(bucket *tbc, int tokens)
 {
   refill_tokens(tbc);
 
@@ -109,17 +109,16 @@ bool check_for_consume(bucket *tbc)
 
 static long wait_time(bucket *tbc)
 {
-  double tokens_needed;
+  int tokens_needed;
   long t_wait;
 
-  
   refill_tokens(tbc);
   
   if (tbc->tokens >= tbc->tokens_aux)
     return 0;
     
   tokens_needed = tbc->tokens_aux - tbc->tokens;
-  t_wait = 1000 * tokens_needed / tbc->rate;
+  t_wait = (1000 * tokens_needed / tbc->rate) + 1;
   return t_wait;
 
 }
@@ -146,21 +145,18 @@ long find_poll_wait_time(client_list *cli_list)
     if (cli_info->can_send == false)
     {
       if (cli_list->client[cli_num].fd > 0)
-        cli_list->client[cli_num].fd = cli_list->client[cli_num].fd * -1;
+        cli_list->client[cli_num].fd = -cli_list->client[cli_num].fd;
       
       if (wait == 0) 
         wait = wait_time(&cli_info->tbc);
-      else if (wait_time(&cli_info->tbc) < wait)
-        wait = wait_time(&cli_info->tbc);    
-              
+      else if (wait_time(&cli_info->tbc) > wait)
+        wait = wait_time(&cli_info->tbc);             
     }
 
     if ((cli_info->can_send = check_for_consume(&cli_info->tbc)) == true &&
-                                                cli_list->client[cli_num].fd < 0)  
-
-      cli_list->client[cli_num].fd = cli_list->client[cli_num].fd * -1;     
-    
-                
+                                               cli_list->client[cli_num].fd < 0)  
+      cli_list->client[cli_num].fd = -cli_list->client[cli_num].fd;     
+                 
     cli_info = cli_info->next;
     cli_num++;
   }

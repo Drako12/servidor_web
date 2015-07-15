@@ -47,65 +47,29 @@ int main(int argc, char *argv[])
       
       if (cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM))
       {
-        if ((ret = get_http_request(cli_info, sockfd)) < 0 )
+        if ((ret = process_http_request(cli_info, s_info.dir_path, sockfd)
+                                        < 0))
         {
           if (ret == -1)
             close_connection(cli_info, &cli_list, cli_num);
           break;
         }
-
-        if (parse_http_request(cli_info, s_info.dir_path) == -1)
-        {
-          close_connection(cli_info, &cli_list, cli_num);
-          break;
-        }              
-
         cli_list.client[cli_num].events = POLLOUT;                       
       }
 
       if (cli_list.client[cli_num].revents & POLLOUT)
-      {
-        if (cli_info->header_sent == false)
+        if (process_bucket_and_send_data(cli_info, &s_info, sockfd) == -1)
         {
-
-          if (send_http_response(cli_info, sockfd, 
-                                 check_request(cli_info, &s_info)) == -1  ||
-                                 cli_info->request_status != OK)
-          {
-            close_connection(cli_info, &cli_list, cli_num);
-            break;
-          }
-          
-          open_file(cli_info); 
-        }    
-        else
-        {         
-          cli_info->can_send = check_for_consume(&cli_info->tbc);
-               
-          if (cli_info->can_send == true)                                   
-          {                        
-            cli_info->tbc.tokens_aux = get_filedata(cli_info);
-            token_buffer_consume(&cli_info->tbc, cli_info->tbc.tokens_aux);
-            
-            if ((send_requested_data(cli_info, sockfd)) == -1)
-            {
-              close_connection(cli_info, &cli_list, cli_num);
-              break;
-            }
-          
-          }
-
-          if (feof(cli_info->fp))
-          {
-            close_connection(cli_info, &cli_list, cli_num);
-            break;
-          }          
-        }
-      }
+          close_connection(cli_info, &cli_list, cli_num);
+          break;
+        }      
 
       if (cli_list.client[cli_num].revents & (POLLERR | POLLHUP | POLLNVAL))
+      {
         close_connection(cli_info, &cli_list, cli_num);
-          
+        break;
+      }
+
       cli_info = cli_info->next;
       cli_num++;
     }  
