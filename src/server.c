@@ -7,17 +7,19 @@
  * \param[in] n_params Numero de parametros vindos do terminal
  * \param[in] dir_path Caminho do diretorio
  * \param[in] port Porta que o servidor ira escutar
+ * \param[in] rate Rate de velocidade em bytes/segundo
  * \param[out] s_info Estrutura onde as informacoes serao salvas
  *
  * \return 0 se OK
  * \return -1 se der algum erro
  */
 
-int parse_param(int n_params, char *dir_path, char *port, server_info *s_info)
+int parse_param(int n_params, char *dir_path, char *port, char *rate, 
+                server_info *s_info)
 {  
-  if(n_params != 3)
+  if(n_params != 4)
   {
-    fprintf(stderr, "Bad parameters\nUsage: server [DIR_PATH] [PORT]\n");
+    fprintf(stderr, "Bad parameters\nUsage: server [DIR_PATH] [PORT] [RATE]\n");
     return -1;
   }
 
@@ -26,12 +28,19 @@ int parse_param(int n_params, char *dir_path, char *port, server_info *s_info)
   if((atoi(s_info->port)) > MAX_PORT)
   {
     fprintf(stderr, "Bad port\nPort Number has to be lower than 65535\n"
-                    "Usage: server [DIR_PATH] [PORT]\n");
+                    "Usage: server [DIR_PATH] [PORT] [RATE]\n");
     return -1;
   }
 
   strncpy(s_info->dir_path, dir_path, PATH_MAX);    
-  
+  s_info->client_rate =  strtod(rate, NULL);
+  if (errno == ERANGE)
+  {
+    fprintf(stderr, "Bad rate number\nn"
+                    "Usage: server [DIR_PATH] [PORT] [RATE]\n");
+    return -1;
+  }
+
   return 0;
 }
 
@@ -128,7 +137,7 @@ void reset_poll(client_list *cli_list, int listenfd)
  * return NULL se nao conseguir alocar o node
  */
 
-static client_info *list_add(client_list *cli_list)
+static client_info *list_add(client_list *cli_list, long rate)
 {
   client_info *cli_info;
   
@@ -148,7 +157,7 @@ static client_info *list_add(client_list *cli_list)
 
   cli_info->can_send = true;
 
-  token_buffer_init(&cli_info->tbc, 50000, 50000, 10000);
+  token_buffer_init(&cli_info->tbc, 50000, 50000, rate);
   return cli_info; 
 }
 
@@ -193,7 +202,7 @@ int set_nonblock(int sockfd)
  * return -1 se der algum erro
  */
 
-int check_connection(client_list *cli_list, int listenfd)
+int check_connection(client_list *cli_list, int listenfd, double rate)
 {
   int i, connfd;
   socklen_t clilen;
@@ -216,7 +225,7 @@ int check_connection(client_list *cli_list, int listenfd)
           return -1;
         }
         cli_list->client[i].events = POLLIN;
-        if(!(list_add(cli_list)))
+        if(!(list_add(cli_list, rate)))
         { 
           close(cli_list->client[i].fd);
           shift_client_list(cli_list, i); 
@@ -454,7 +463,7 @@ static char *status_msg(const http_code status)
  * return 0 se tudo der certo 
  * return -1 se der algum erro
  */
-int send_http_response_header(client_info *cli_info, int sockfd, int status)
+int send_http_response(client_info *cli_info, int sockfd, int status)
 {
   char response_msg[HEADERSIZE];
     
@@ -486,7 +495,7 @@ int get_filedata(client_info *cli_info)
 {
   int num_bytes_read = 0;
  
-  num_bytes_read = fread(cli_info->buffer, 1, BUFSIZE - 1,
+  num_bytes_read = fread(cli_info->buffer, 1, cli_info->tbc.tokens_aux,
                          cli_info->fp);          
   if (num_bytes_read < 0)
     return -1;
@@ -512,7 +521,7 @@ int send_requested_data(client_info *cli_info, int sockfd)
   if (ret < 0)
   {  
     if (errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN)
-      return 0; //fseek(cli_info->fp, -cli_info->tbc.tokens_aux, SEEK_CUR);       
+      return 0;        
     else 
       return -1;
   }

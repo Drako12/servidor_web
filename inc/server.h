@@ -62,6 +62,7 @@ typedef struct server_info_
 {
   char dir_path[PATH_MAX];
   char port[MAX_PORT_LEN];
+  double client_rate;
 } server_info;
 
 typedef struct client_info_
@@ -85,25 +86,25 @@ typedef struct client_list_
 } client_list;
 
 
-int parse_param(int n_params, char *dir_path, char *port, server_info *s_info);
+int parse_param(int n_params, char *dir_path, char *port, char *rate,
+                server_info *s_info);
 int server_start(const server_info *s_info);
 void server_init(client_list *cli_list, int listenfd);
 void reset_poll(client_list *cli_list, int listenfd);
 void close_connection(client_info *cli_info, client_list *cli_list,
                       int cli_num);
-int check_connection(client_list *cli_list, int listenfd);
+int check_connection(client_list *cli_list, int listenfd, double rate);
 int get_http_request(client_info *cli_info, int sockfd);
 int parse_http_request(client_info *cli_info, const char *dir_path);
 void open_file(client_info *cli_info);
-int send_http_response_header(client_info *cli_info, int sockfd, int status);
+int send_http_response(client_info *cli_info, int sockfd, int status);
 int get_filedata(client_info *cli_info);
 int send_requested_data(client_info *cli_info, int sockfd);
 int set_nonblock(int sockfd);
 int check_request(client_info *cli_info, server_info *s_info);
-int token_buffer_init(bucket *tbc, double tokens, double max_burst,
+void token_buffer_init(bucket *tbc, double tokens, double capacity,
                       double rate);
-bool token_buffer_consume(bucket *tbc);
-long wait_time(bucket *tbc);
+bool token_buffer_consume(bucket *tbc, double tokens);
 bool check_for_consume(bucket *tbc);
 long find_poll_wait_time(client_list *cli_list);
 
