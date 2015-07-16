@@ -53,7 +53,7 @@ int parse_param(int n_params, char *dir_path, char *port, char *rate,
  * \return -1 se der algum erro
  */
 
-int server_start(const server_info *s_info)
+int server_start_listen(const server_info *s_info)
 {
   int enable = 1, listenfd = -1, ret = 0;
   struct addrinfo hints, *servinfo, *aux;
@@ -96,7 +96,7 @@ int server_start(const server_info *s_info)
     return -1;    
   }
   
-  
+  freeaddrinfo(servinfo); 
   return listenfd;
 }
 
@@ -157,7 +157,7 @@ static client_info *list_add(client_list *cli_list, long rate)
 
   cli_info->can_send = true;
 
-  token_buffer_init(&cli_info->tbc, 0, 50000, rate);
+  bucket_init(&cli_info->tbc, 0, 50000, rate);
   return cli_info; 
 }
 
@@ -400,6 +400,7 @@ static int parse_http_request(client_info *cli_info, const char *dir_path)
   
   realpath(path, cli_info->file_path); 
   
+
   return 0;
 } 
 
@@ -545,7 +546,8 @@ static int get_filedata(client_info *cli_info)
 static int send_requested_data(client_info *cli_info, int sockfd)
 {
   int ret;
-  ret = send(sockfd, cli_info->buffer, cli_info->tbc.tokens_aux, MSG_NOSIGNAL); 
+  ret = send(sockfd, cli_info->buffer, cli_info->tbc.tokens_aux,
+             MSG_NOSIGNAL); 
   
   if (ret < 0)
   {  
@@ -568,7 +570,8 @@ int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
 
   if (cli_info->header_sent == false)
   {
-    ret = send_http_response(cli_info, sockfd, check_request(cli_info, s_info));
+    ret = send_http_response(cli_info, sockfd, check_request(cli_info,
+                             s_info));
     if (ret == -1 || cli_info->request_status != OK)
       return ret;
 
@@ -576,12 +579,12 @@ int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
   }  
   else
   {         
-    cli_info->can_send = check_for_consume(&cli_info->tbc);
+    cli_info->can_send = bucket_check(&cli_info->tbc);
          
     if (cli_info->can_send == true)                                   
     {                        
       cli_info->tbc.tokens_aux = get_filedata(cli_info);
-      token_buffer_consume(&cli_info->tbc, cli_info->tbc.tokens_aux);
+      bucket_consume(&cli_info->tbc, cli_info->tbc.tokens_aux);
       
       ret = send_requested_data(cli_info, sockfd);
       if (ret == -1)
@@ -594,3 +597,69 @@ int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
 
 return 0;  
 }
+
+/*!
+ * \brief Funcao para calcular o tempo de espera do poll, o wait e' o menor 
+ * tempo da lista de clientes
+ *
+ * \param[in] cli_list Lista de clientes
+ * 
+ * \return wait tempo a ser esperado pelo poll
+ */
+
+struct timespec find_poll_wait_time(client_list *cli_list)
+{
+  int cli_num;
+  size_t time = 0, time_aux = 0;
+  struct timespec wait, wait_aux;
+  client_info *cli_info; 
+  memset(&wait, 0, sizeof(wait));
+  memset(&wait_aux, 0, sizeof(wait_aux));
+  cli_num = SERVER_INDEX + 1;
+  cli_info = cli_list->head;  
+    
+  while (cli_info)
+  {
+    if (cli_info->can_send == false)
+    {
+      if (cli_list->client[cli_num].fd > 0)
+        cli_list->client[cli_num].fd = -cli_list->client[cli_num].fd;
+      
+      wait_aux = bucket_wait(&cli_info->tbc);
+ 
+      timespecisset(&wait);
+      time = 1000000000 * wait_aux.tv_sec + wait_aux.tv_nsec;
+
+      if (time == 0)
+      {
+        wait = bucket_wait(&cli_info->tbc);
+      }
+      else if (time < time_aux)
+        wait = wait_aux; 
+        
+      time_aux = 1000000000 * wait.tv_sec + wait.tv_nsec;        
+    }
+
+    if ((cli_info->can_send = bucket_check(&cli_info->tbc)) == true &&
+                                           cli_list->client[cli_num].fd < 0)  
+      cli_list->client[cli_num].fd = -cli_list->client[cli_num].fd;     
+                 
+    cli_info = cli_info->next;
+    cli_num++;
+  }
+
+  return wait;
+}
+
+void cleanup(client_list *cli_list)
+{
+  client_info *cli_info;
+
+  cli_info = cli_list->head;
+  while (cli_info)
+  {
+    clean_struct(cli_info);
+    cli_info = cli_info->next;
+  }
+}
+

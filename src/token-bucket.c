@@ -1,4 +1,4 @@
-#include "server.h"
+#include "bucket.h"
 
 /*!
  * \brief Funcao para pegar o tempo atual (timestamp)
@@ -9,7 +9,6 @@ static long time_now()
 {
   struct timeval time;
   gettimeofday(&time, NULL);
-
   return (long)(time.tv_sec * 1000 + time.tv_usec/1000);
 }
 
@@ -21,12 +20,14 @@ static long time_now()
 
 static void refill_tokens(bucket *tbc)
 {
-  long now = time_now();
-  long delta = (now - tbc->timestamp);
+  long now, delta;
+  
+  now = time_now();
+  delta = (now - tbc->timestamp);
   
   if (tbc->tokens < tbc->capacity)
   {
-    int new_tokens;
+    long new_tokens;
     
     new_tokens = delta * tbc->rate * 0.001;
     
@@ -47,7 +48,7 @@ static void refill_tokens(bucket *tbc)
  * 
  */
 
-void token_buffer_init(bucket *tbc, int tokens, int capacity, int rate)
+void bucket_init(bucket *tbc, int tokens, int capacity, int rate)
 {
   tbc->capacity = capacity;
   tbc->tokens = tokens;
@@ -64,7 +65,7 @@ void token_buffer_init(bucket *tbc, int tokens, int capacity, int rate)
  * \return false se nao tiver saldo suficiente para consumir
  */
 
-bool token_buffer_consume(bucket *tbc, int tokens)
+bool bucket_consume(bucket *tbc, int tokens)
 {
   refill_tokens(tbc);
 
@@ -83,7 +84,7 @@ bool token_buffer_consume(bucket *tbc, int tokens)
  * \return false se nao for possivel consumir
  */
 
-bool check_for_consume(bucket *tbc)
+bool bucket_check(bucket *tbc)
 {
   refill_tokens(tbc);
    
@@ -107,60 +108,20 @@ bool check_for_consume(bucket *tbc)
  * \return t_wait tempo a ser esperado
  */
 
-static long wait_time(bucket *tbc)
+struct timespec bucket_wait(bucket *tbc)
 {
   int tokens_needed;
-  long t_wait;
-
+  struct timespec t_wait;
+  memset(&t_wait, 0, sizeof(t_wait));
   refill_tokens(tbc);
   
   if (tbc->tokens >= tbc->tokens_aux)
-    return 0;
+    return t_wait;
     
   tokens_needed = tbc->tokens_aux - tbc->tokens;
-  t_wait = (1000 * tokens_needed / tbc->rate) + 1;
+  t_wait.tv_nsec = tokens_needed / (tbc->rate/1000000000);
+  t_wait.tv_sec = (int)(tokens_needed / tbc->rate);
   return t_wait;
-
 }
 
-/*!
- * \brief Funcao para calcular o tempo de espera do poll, o wait e' o menor 
- * tempo da lista de clientes
- *
- * \param[in] cli_list Lista de clientes
- * 
- * \return wait tempo a ser esperado pelo poll
- */
-
-long find_poll_wait_time(client_list *cli_list)
-{
-  int cli_num;
-  long wait = 0;
-  client_info *cli_info; 
-  cli_num = SERVER_INDEX + 1;
-  cli_info = cli_list->head;  
-    
-  while (cli_info)
-  {
-    if (cli_info->can_send == false)
-    {
-      if (cli_list->client[cli_num].fd > 0)
-        cli_list->client[cli_num].fd = -cli_list->client[cli_num].fd;
-      
-      if (wait == 0) 
-        wait = wait_time(&cli_info->tbc);
-      else if (wait_time(&cli_info->tbc) > wait)
-        wait = wait_time(&cli_info->tbc);             
-    }
-
-    if ((cli_info->can_send = check_for_consume(&cli_info->tbc)) == true &&
-                                               cli_list->client[cli_num].fd < 0)  
-      cli_list->client[cli_num].fd = -cli_list->client[cli_num].fd;     
-                 
-    cli_info = cli_info->next;
-    cli_num++;
-  }
-
-  return wait;
-}
 

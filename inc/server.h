@@ -1,6 +1,9 @@
 #ifndef SERVER_H_INCLUDED
 #define SERVER_H_INCLUDED
 
+#define _XOPEN_SOURCE 600
+#define _GNU_SOURCE
+#include "bucket.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -16,9 +19,11 @@
 #include <ctype.h>
 #include <limits.h>
 #include <stdbool.h>
-#include <sys/time.h>
 #include <stdint.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <time.h>
+#include <sys/time.h>
 
 #define BUFSIZE BUFSIZ
 #define HEADERSIZE 512
@@ -49,14 +54,6 @@ typedef enum methods_
   PUT
 }methods;
 
-typedef struct token_bucket
-{
-  int capacity;
-  int tokens;
-  int tokens_aux;
-  int rate;
-  long timestamp;
-} bucket;
 
 typedef struct server_info_
 {
@@ -88,7 +85,7 @@ typedef struct client_list_
 
 int parse_param(int n_params, char *dir_path, char *port, char *rate,
                 server_info *s_info);
-int server_start(const server_info *s_info);
+int server_start_listen(const server_info *s_info);
 void server_init(client_list *cli_list, int listenfd);
 void reset_poll(client_list *cli_list, int listenfd);
 void close_connection(client_info *cli_info, client_list *cli_list,
@@ -100,10 +97,7 @@ void open_file(client_info *cli_info);
 int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
                                  int sockfd);
 int set_nonblock(int sockfd);
-void token_buffer_init(bucket *tbc, int tokens, int capacity,
-                       int rate);
-bool token_buffer_consume(bucket *tbc, int tokens);
-bool check_for_consume(bucket *tbc);
-long find_poll_wait_time(client_list *cli_list);
+struct timespec find_poll_wait_time(client_list *cli_list);
+void cleanup(client_list *cli_list);
 
 #endif

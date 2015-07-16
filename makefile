@@ -1,4 +1,4 @@
-C = clang
+CC = clang
 TARGET = server
 CFLAGS = -Wall -Wextra -g -I$(INCDIR)
 LFLAGS = 
