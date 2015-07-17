@@ -32,11 +32,11 @@
 #define MAX_LISTEN 512
 #define MAX_METHOD_LEN 4
 #define SERVER_INDEX 0
-#define FORMAT(S) 
-#define RESOLVE(S) FORMAT(S) 
+#define FORMAT(S)
+#define RESOLVE(S) FORMAT(S)
 #define STR_STATUS FORMAT(MAX_HTTP_STATUS_LEN)
-#define STR_METHOD FORMAT(MAX_METHOD_LEN) 
-#define STR_PATH FORMAT(PATH_MAX) 
+#define STR_METHOD FORMAT(MAX_METHOD_LEN)
+#define STR_PATH FORMAT(PATH_MAX)
 
 typedef enum http_code_
 {
@@ -66,18 +66,19 @@ typedef struct client_info_
   char *buffer;
   char file_path[PATH_MAX];
   int request_status;
+  int incomplete_send;
   bool header_sent;
   bool can_send;
   FILE *fp;
   struct client_info_ *next;
   methods method;
-  bucket tbc;
+  t_bucket bucket;
 } client_info;
 
-typedef struct client_list_ 
+typedef struct client_list_
 {
-  int list_len; 
-  struct pollfd client[MAX_CLIENTS];  
+  int list_len;
+  struct pollfd client[MAX_CLIENTS];
   client_info *head;
 } client_list;
 
@@ -85,18 +86,19 @@ typedef struct client_list_
 int parse_param(int n_params, char *dir_path, char *port, char *rate,
                 server_info *s_info);
 int server_start_listen(const server_info *s_info);
-void server_init(client_list *cli_list, int listenfd);
-void reset_poll(client_list *cli_list, int listenfd);
+void client_list_init(client_list *cli_list, int listenfd);
 void close_connection(client_info *cli_info, client_list *cli_list,
                       int cli_num);
-int check_connection(client_list *cli_list, int listenfd, int rate);
+int check_connection(client_list *cli_list, int listenfd, double rate);
 int process_http_request(client_info *cli_info, const char *dir_path,
                          int sockfd);
 void open_file(client_info *cli_info);
 int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
                                  int sockfd);
 int set_nonblock(int sockfd);
-struct timespec find_poll_wait_time(client_list *cli_list);
+struct timespec find_poll_wait_time(client_info *cli_info,
+                                    struct timespec t_wait);
 void cleanup(client_list *cli_list);
+void set_clients(client_info *cli_info, client_list *cli_list, int cli_num);
 
 #endif

@@ -13,16 +13,18 @@ typedef struct token_bucket
 {
   double capacity;
   double tokens;
-  double tokens_aux;
-  long rate;
+  double to_be_consumed_tokens;
+  double rate;
   long timestamp;
 
-} bucket;
-i
+} t_bucket;
 
-void bucket_init(bucket *tbc, double tokens, double capacity, long rate);
-bool bucket_consume(bucket *tbc, double tokens);
-bool bucket_check(bucket *tbc);
-struct timespec bucket_wait(bucket *tbc);
+void bucket_init(t_bucket *bucket, double tokens, double capacity,
+                 double rate);
+bool bucket_consume(t_bucket *bucket, double tokens);
+bool bucket_check(t_bucket *bucket);
+struct timespec bucket_wait(t_bucket *bucket);
+int timespec_compare(struct timespec *t1, struct timespec *t2);
+int timespec_isset(struct timespec *t1);
 
 #endif
