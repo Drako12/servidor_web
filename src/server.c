@@ -573,7 +573,7 @@ int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
     ret = send_http_response(cli_info, sockfd, check_request(cli_info,
                              s_info));
     if (ret == -1 || cli_info->request_status != OK)
-      return ret;
+      return -1;
 
     open_file(cli_info);
   }  
@@ -627,14 +627,13 @@ struct timespec find_poll_wait_time(client_list *cli_list)
       
       wait_aux = bucket_wait(&cli_info->tbc);
  
-      timespecisset(&wait);
       time = 1000000000 * wait_aux.tv_sec + wait_aux.tv_nsec;
 
       if (time == 0)
       {
         wait = bucket_wait(&cli_info->tbc);
       }
-      else if (time < time_aux)
+      else if (time > time_aux)
         wait = wait_aux; 
         
       time_aux = 1000000000 * wait.tv_sec + wait.tv_nsec;        

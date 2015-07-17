@@ -1,7 +1,6 @@
 #ifndef SERVER_H_INCLUDED
 #define SERVER_H_INCLUDED
 
-#define _XOPEN_SOURCE 600
 #define _GNU_SOURCE
 #include "bucket.h"
 #include <stdio.h>

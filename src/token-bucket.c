@@ -7,9 +7,10 @@
 
 static long time_now()
 {
-  struct timeval time;
-  gettimeofday(&time, NULL);
-  return (long)(time.tv_sec * 1000 + time.tv_usec/1000);
+  struct timespec time;
+  //gettimeofday(&time, NULL);
+  clock_gettime(CLOCK_REALTIME, &time);
+  return (long)(time.tv_sec * 1000 + time.tv_nsec/1000000);
 }
 
 /*!
@@ -21,13 +22,13 @@ static long time_now()
 static void refill_tokens(bucket *tbc)
 {
   long now, delta;
-  
+ 
   now = time_now();
   delta = (now - tbc->timestamp);
   
   if (tbc->tokens < tbc->capacity)
   {
-    long new_tokens;
+    double new_tokens;
     
     new_tokens = delta * tbc->rate * 0.001;
     
@@ -48,7 +49,7 @@ static void refill_tokens(bucket *tbc)
  * 
  */
 
-void bucket_init(bucket *tbc, int tokens, int capacity, int rate)
+void bucket_init(bucket *tbc, double tokens, double capacity, long rate)
 {
   tbc->capacity = capacity;
   tbc->tokens = tokens;
@@ -65,7 +66,7 @@ void bucket_init(bucket *tbc, int tokens, int capacity, int rate)
  * \return false se nao tiver saldo suficiente para consumir
  */
 
-bool bucket_consume(bucket *tbc, int tokens)
+bool bucket_consume(bucket *tbc, double tokens)
 {
   refill_tokens(tbc);
 
@@ -110,7 +111,7 @@ bool bucket_check(bucket *tbc)
 
 struct timespec bucket_wait(bucket *tbc)
 {
-  int tokens_needed;
+  double tokens_needed;
   struct timespec t_wait;
   memset(&t_wait, 0, sizeof(t_wait));
   refill_tokens(tbc);
@@ -119,7 +120,7 @@ struct timespec bucket_wait(bucket *tbc)
     return t_wait;
     
   tokens_needed = tbc->tokens_aux - tbc->tokens;
-  t_wait.tv_nsec = tokens_needed / (tbc->rate/1000000000);
+  t_wait.tv_nsec = 1000 * tokens_needed / (tbc->rate/1000000);
   t_wait.tv_sec = (int)(tokens_needed / tbc->rate);
   return t_wait;
 }
