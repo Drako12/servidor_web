@@ -14,8 +14,8 @@
  * \return -1 se der algum erro
  */
 
-int parse_param(int n_params, char *dir_path, char *port, char *rate,
-                server_info *s_info)
+int parse_and_fill_server_info(int n_params, char *dir_path, char *port,
+                               char *rate, server_info *s_info)
 {
   if (n_params != 4)
   {
@@ -41,6 +41,8 @@ int parse_param(int n_params, char *dir_path, char *port, char *rate,
                     "Usage: server [DIR_PATH] [PORT] [RATE]\n");
     return -1;
   }
+
+  s_info->max_clients = NCLIENTS;
 
   return 0;
 }
@@ -110,15 +112,38 @@ int server_start_listen(const server_info *s_info)
  * no client armazena o socket de escuta do servidor
  */
 
-void client_list_init(client_list *cli_list, int listenfd)
+void client_list_init(client_list *cli_list, int listenfd, int max_clients)
 {
-  int i;
+  int i;  
   memset(cli_list, 0, sizeof(*cli_list));
+  cli_list->client = calloc(max_clients, sizeof(struct pollfd));
   cli_list->client[SERVER_INDEX].fd = listenfd;
   cli_list->client[SERVER_INDEX].events = POLLIN;
-  for (i = SERVER_INDEX + 1; i < MAX_CLIENTS; i++)
+  for (i = SERVER_INDEX + 1; i < max_clients; i++)
     cli_list->client[i].fd = -1;
 }
+
+static void inc_max_clients(client_list *cli_list, server_info *s_info)
+{
+  int i;
+
+  s_info->max_clients *= 2;
+  cli_list->client = realloc(cli_list->client,
+                             s_info->max_clients * sizeof(*cli_list->client));
+  
+  for (i = cli_list->list_len + 1; i < s_info->max_clients; i++)
+    cli_list->client[i].fd = -1;
+  
+}
+
+static void dec_max_clients(client_list *cli_list, server_info *s_info)
+{
+  s_info->max_clients /= 2;
+  cli_list->client = realloc(cli_list->client, 
+                             s_info->max_clients * sizeof(*cli_list->client));
+}
+
+
 
 /*!
  * \brief Adiciona um node a lista de clientes
@@ -129,7 +154,7 @@ void client_list_init(client_list *cli_list, int listenfd)
  * return NULL se nao conseguir alocar o node
  */
 
-static client_info *list_add(client_list *cli_list, double rate)
+static client_info *list_add(client_list *cli_list, server_info *s_info)
 {
   client_info *cli_info;
 
@@ -146,10 +171,16 @@ static client_info *list_add(client_list *cli_list, double rate)
     i->next = cli_info;
   }
   cli_list->list_len++;
-
+  
+  if (cli_list->list_len == s_info->max_clients)
+    inc_max_clients(cli_list, s_info);
+  else if (cli_list->list_len == (s_info->max_clients/4 && 
+           cli_list->list_len > NCLIENTS))  
+    dec_max_clients(cli_list, s_info); 
+  
   cli_info->can_send = true;
 
-  bucket_init(&cli_info->bucket, 0, 50000, rate);
+  bucket_init(&cli_info->bucket, 0, 50000, s_info->client_rate);
   return cli_info;
 }
 
@@ -194,7 +225,7 @@ int set_nonblock(int sockfd)
  * return -1 se der algum erro
  */
 
-int check_connection(client_list *cli_list, int listenfd, double rate)
+int check_connection(client_list *cli_list, int listenfd, server_info *s_info)
 {
   int i, connfd;
   socklen_t clilen;
@@ -205,7 +236,7 @@ int check_connection(client_list *cli_list, int listenfd, double rate)
                         &clilen)) == -1)
       return -1;
 
-    for (i = SERVER_INDEX + 1; i < MAX_CLIENTS; i++)
+    for (i = cli_list->list_len; i < s_info->max_clients; i++)
     {
       if (cli_list->client[i].fd == -1)
       {
@@ -217,7 +248,7 @@ int check_connection(client_list *cli_list, int listenfd, double rate)
           return -1;
         }
         cli_list->client[i].events = POLLIN;
-        if(!(list_add(cli_list, rate)))
+        if(!(list_add(cli_list, s_info)))
         {
           close(cli_list->client[i].fd);
           shift_client_list(cli_list, i);
@@ -647,6 +678,16 @@ struct timespec find_poll_wait_time(client_info *cli_info,
   return t_wait;
 }
 
+/*!
+ * \brief Seta uma flag na estrutura de clientes para saber se pode ou nao
+ * enviar dados
+ *
+ * \param[in] cli_list Lista de clientes
+ * \param[in] cli_info node de clientes atual
+ * \param[in] cli_num posicao do vetor do pollfd 
+ *
+ */
+
 void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
 {
   cli_info->can_send = bucket_check(&cli_info->bucket);
@@ -658,6 +699,12 @@ void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
 
 }
 
+/*!
+ * \brief Faz o cleanup caso o programa se receba um sinal
+ *
+ * \param[in] cli_list Lista de clientes
+ *
+ */
 void cleanup(client_list *cli_list)
 {
   client_info *cli_info, *curr_cli;
@@ -671,5 +718,6 @@ void cleanup(client_list *cli_list)
     cli_info = cli_info->next;
     free(curr_cli);
   }
+  free(cli_list->client);
 }
 

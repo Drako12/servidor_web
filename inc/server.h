@@ -26,7 +26,7 @@
 
 #define BUFSIZE BUFSIZ
 #define HEADERSIZE 512
-#define MAX_CLIENTS 512
+#define NCLIENTS 128
 #define MAX_PORT 65535
 #define MAX_PORT_LEN 6
 #define MAX_LISTEN 512
@@ -59,6 +59,7 @@ typedef struct server_info_
   char dir_path[PATH_MAX];
   char port[MAX_PORT_LEN];
   int client_rate;
+  int max_clients;
 } server_info;
 
 typedef struct client_info_
@@ -78,18 +79,18 @@ typedef struct client_info_
 typedef struct client_list_
 {
   int list_len;
-  struct pollfd client[MAX_CLIENTS];
+  struct pollfd *client;
   client_info *head;
 } client_list;
 
 
-int parse_param(int n_params, char *dir_path, char *port, char *rate,
-                server_info *s_info);
+int parse_and_fill_server_info(int n_params, char *dir_path, char *port,
+                               char *rate, server_info *s_info);
 int server_start_listen(const server_info *s_info);
-void client_list_init(client_list *cli_list, int listenfd);
+void client_list_init(client_list *cli_list, int listenfd, int max_clients);
 void close_connection(client_info *cli_info, client_list *cli_list,
                       int cli_num);
-int check_connection(client_list *cli_list, int listenfd, double rate);
+int check_connection(client_list *cli_list, int listenfd, server_info *s_info);
 int process_http_request(client_info *cli_info, const char *dir_path,
                          int sockfd);
 void open_file(client_info *cli_info);

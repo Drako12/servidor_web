@@ -31,13 +31,14 @@ int main(int argc, char *argv[])
   sigprocmask(SIG_BLOCK, &sigmask, NULL);
   sigemptyset(&sigmask);
 
-  if (parse_param(argc, argv[1], argv[2], argv[3], &s_info) == -1)
+  if (parse_and_fill_server_info(argc, argv[1], argv[2], argv[3],
+                                 &s_info) == -1)
     return -1;
 
   if ((listenfd = server_start_listen(&s_info)) == -1)
     return -1;
 
-  client_list_init(&cli_list, listenfd);
+  client_list_init(&cli_list, listenfd, s_info.max_clients);
 
   while (!finished)
   {
@@ -52,8 +53,7 @@ int main(int argc, char *argv[])
       continue;
 
     if (cli_list.client[SERVER_INDEX].revents & POLLIN)
-      if (check_connection(&cli_list, listenfd, s_info.client_rate)
-                           == -1 || --ret <= 0)
+      if (check_connection(&cli_list, listenfd, &s_info) == -1 || --ret <= 0)
         continue;
 
 
