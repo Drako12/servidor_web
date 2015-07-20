@@ -123,6 +123,13 @@ void client_list_init(client_list *cli_list, int listenfd, int max_clients)
     cli_list->client[i].fd = -1;
 }
 
+/*!
+ * \brief Dobra a quantidade de clientes que podem ser alocados
+ *
+ * \param[out] cli_list Lista de clientes
+ * \param[out] s_info Dados de configuracao do servidor
+ */
+
 static void inc_max_clients(client_list *cli_list, server_info *s_info)
 {
   int i;
@@ -136,6 +143,13 @@ static void inc_max_clients(client_list *cli_list, server_info *s_info)
   
 }
 
+/*!
+ * \brief Divide pela metade a quantidade de clientes que podem ser alocados
+ *
+ * \param[out] cli_list Lista de clientes
+ * \param[out] s_info Dados de configuracao do servidor
+ */
+
 static void dec_max_clients(client_list *cli_list, server_info *s_info)
 {
   s_info->max_clients /= 2;
@@ -146,8 +160,9 @@ static void dec_max_clients(client_list *cli_list, server_info *s_info)
 
 
 /*!
- * \brief Adiciona um node a lista de clientes
- *
+ * \brief Adiciona um node a lista de clientes, checa a quantidade de clientes
+ * e chama uma funcao para desalocar ou alocar mais espaco.
+ * param[in] s_info Dados de configuracao do servidor
  * param[out] cli_list Lista de clientes
  *
  * return cli_info node atual
@@ -578,8 +593,8 @@ static int send_requested_data(client_info *cli_info, int sockfd)
 {
   int ret;
   ret = send(sockfd, cli_info->buffer + cli_info->incomplete_send,
-             cli_info->bucket.to_be_consumed_tokens - cli_info->incomplete_send,
-             MSG_NOSIGNAL);
+             cli_info->bucket.to_be_consumed_tokens -
+             cli_info->incomplete_send, MSG_NOSIGNAL);
 
   if (ret < 0)
   {
@@ -636,7 +651,7 @@ int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
       if (cli_info->incomplete_send == 0)
       {
         cli_info->bucket.to_be_consumed_tokens = get_filedata(cli_info);
-        bucket_consume(&cli_info->bucket, cli_info->bucket.to_be_consumed_tokens);
+        bucket_consume(&cli_info->bucket);
       }
       ret = send_requested_data(cli_info, sockfd);
       if (ret == -1)

@@ -21,7 +21,8 @@ $(BINDIR)/$(TARGET): $(OBJECTS)
 $(OBJECTS): $(OBJDIR)/%.o : $(SRCDIR)/%.c
 	mkdir -p $(OBJDIR)	
 	$(CC) -c $(CFLAGS) $< -o $@	
-
+	cscope -b -q -R
+	ctags -R
 clean:
 	rm -rf $(OBJECTS) $(OBJDIR) $(BINDIR)/$(TARGET) $(BINDIR)
 

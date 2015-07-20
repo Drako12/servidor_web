@@ -21,7 +21,7 @@ typedef struct token_bucket
 
 void bucket_init(t_bucket *bucket, double tokens, double capacity,
                  double rate);
-bool bucket_consume(t_bucket *bucket, double tokens);
+bool bucket_consume(t_bucket *bucket);
 bool bucket_check(t_bucket *bucket);
 struct timespec bucket_wait(t_bucket *bucket);
 int timespec_compare(struct timespec *t1, struct timespec *t2);

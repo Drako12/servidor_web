@@ -69,14 +69,14 @@ void bucket_init(t_bucket *bucket, double tokens, double capacity, double rate)
  * \return false se nao tiver saldo suficiente para consumir
  */
 
-bool bucket_consume(t_bucket *bucket, double tokens)
+bool bucket_consume(t_bucket *bucket)
 {
   refill_tokens(bucket);
 
-  if (bucket->tokens < tokens)
+  if (bucket->tokens < bucket->to_be_consumed_tokens)
     return false;
 
-  bucket->tokens -= tokens;
+  bucket->tokens -= bucket->to_be_consumed_tokens;
   return true;
 }
 
