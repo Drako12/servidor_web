@@ -1,5 +1,6 @@
 #include "server.h"
 #include "bucket.h"
+#include "thread.h"
 
 int finished = 0;
 
@@ -11,11 +12,12 @@ void signal_callback_handler(int signum)
 
 int main(int argc, char *argv[])
 {
-  int listenfd;
+  int listenfd, s_socket;
   struct sigaction action;
   struct timespec poll_wait;
   server_info s_info;
   client_list cli_list;
+  thread_pool pool;
   sigset_t sigmask;
 
   memset(&s_info, 0, sizeof(s_info));
@@ -39,6 +41,10 @@ int main(int argc, char *argv[])
     return -1;
 
   client_list_init(&cli_list, listenfd, s_info.max_clients);
+
+  s_socket = server_socket_init();
+  pthread_mutex_init(&lock, NULL);
+  create_pool(&pool, s_info.max_clients);
 
   while (!finished)
   {
@@ -81,7 +87,8 @@ int main(int argc, char *argv[])
         cli_list.client[cli_num].events = POLLOUT;
       }
       else if (cli_list.client[cli_num].revents & POLLOUT)
-        if (process_bucket_and_send_data(cli_info, &s_info, sockfd) == -1)
+        if (process_bucket_and_send_data(cli_info, &s_info, sockfd,
+            pool) == -1)
         {
           close_connection(cli_info, &cli_list, cli_num);
           break;

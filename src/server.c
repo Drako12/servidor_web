@@ -103,6 +103,19 @@ int server_start_listen(const server_info *s_info)
   return listenfd;
 }
 
+int server_socket_init()
+{
+  int sockfd;
+  struct sockaddr_un server_addr;
+
+  memset(&server_addr, 0 sizeof(server_addr));
+  server_addr.sun_family = AF_UNIX;
+  strcpy(server_addr.sun_path, "/tmp/SERVER_SOCKET");
+  sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
+  bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr));
+  return sockfd;
+}
+
 /*!
  * \brief Faz inicializacoes de variaveis na estrutura de clientes e do
  * servidor
@@ -114,7 +127,7 @@ int server_start_listen(const server_info *s_info)
 
 void client_list_init(client_list *cli_list, int listenfd, int max_clients)
 {
-  int i;  
+  int i;
   memset(cli_list, 0, sizeof(*cli_list));
   cli_list->client = calloc(max_clients, sizeof(struct pollfd));
   cli_list->client[SERVER_INDEX].fd = listenfd;
@@ -137,10 +150,10 @@ static void inc_max_clients(client_list *cli_list, server_info *s_info)
   s_info->max_clients *= 2;
   cli_list->client = realloc(cli_list->client,
                              s_info->max_clients * sizeof(*cli_list->client));
-  
+
   for (i = cli_list->list_len + 1; i < s_info->max_clients; i++)
     cli_list->client[i].fd = -1;
-  
+
 }
 
 /*!
@@ -153,7 +166,7 @@ static void inc_max_clients(client_list *cli_list, server_info *s_info)
 static void dec_max_clients(client_list *cli_list, server_info *s_info)
 {
   s_info->max_clients /= 2;
-  cli_list->client = realloc(cli_list->client, 
+  cli_list->client = realloc(cli_list->client,
                              s_info->max_clients * sizeof(*cli_list->client));
 }
 
@@ -186,13 +199,13 @@ static client_info *list_add(client_list *cli_list, server_info *s_info)
     i->next = cli_info;
   }
   cli_list->list_len++;
-  
+
   if (cli_list->list_len == s_info->max_clients)
     inc_max_clients(cli_list, s_info);
-  else if (cli_list->list_len == (s_info->max_clients/4 && 
-           cli_list->list_len > NCLIENTS))  
-    dec_max_clients(cli_list, s_info); 
-  
+  else if (cli_list->list_len == (s_info->max_clients/4 &&
+           cli_list->list_len > NCLIENTS))
+    dec_max_clients(cli_list, s_info);
+
   cli_info->can_send = true;
 
   bucket_init(&cli_info->bucket, 0, 50000, s_info->client_rate);
@@ -479,12 +492,12 @@ int process_http_request(client_info *cli_info, const char *dir_path,
  * param[out] cli_info Node atual
  */
 
-void open_file(client_info *cli_info)
+int open_file(client_info *cli_info)
 {
   cli_info->fp = fopen(cli_info->file_path, "rb");
-  //if (cli_info->fp == NULL)
-  //  return -1;
-//  return 0;
+  if (cli_info->fp == NULL)
+    return -1;
+  return 0;
 }
 
 /*!
@@ -629,7 +642,7 @@ static int send_requested_data(client_info *cli_info, int sockfd)
  */
 
 int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
-                                 int sockfd)
+                                 int sockfd, thread_pool *t_pool)
 {
   int ret;
 
@@ -650,6 +663,7 @@ int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
     {
       if (cli_info->incomplete_send == 0)
       {
+        add_to_worker(t_pool, (int *)get_filedata(cli_info));
         cli_info->bucket.to_be_consumed_tokens = get_filedata(cli_info);
         bucket_consume(&cli_info->bucket);
       }
@@ -699,7 +713,7 @@ struct timespec find_poll_wait_time(client_info *cli_info,
  *
  * \param[in] cli_list Lista de clientes
  * \param[in] cli_info node de clientes atual
- * \param[in] cli_num posicao do vetor do pollfd 
+ * \param[in] cli_num posicao do vetor do pollfd
  *
  */
 
