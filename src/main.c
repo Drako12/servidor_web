@@ -3,6 +3,7 @@
 #include "thread.h"
 
 int finished = 0;
+pthread_mutex_t g_lock;
 
 void signal_callback_handler(int signum)
 {
@@ -40,11 +41,12 @@ int main(int argc, char *argv[])
   if ((listenfd = server_start_listen(&s_info)) == -1)
     return -1;
 
-  client_list_init(&cli_list, listenfd, s_info.max_clients);
-
   s_socket = server_socket_init();
-  pthread_mutex_init(&lock, NULL);
-  create_pool(&pool, s_info.max_clients);
+
+  client_list_init(&cli_list, listenfd, s_info.max_clients, s_socket);
+
+  pthread_mutex_init(&g_lock, NULL);
+  create_pool_and_queue_init(&pool);
 
   while (!finished)
   {
@@ -73,7 +75,7 @@ int main(int argc, char *argv[])
       set_clients(cli_info, &cli_list, cli_num);
       poll_wait = find_poll_wait_time(cli_info, poll_wait);
 
-      sockfd = cli_list.client[cli_num].fd;
+      sockfd = cli_info->sockfd;
 
       if (cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM))
       {
@@ -88,7 +90,7 @@ int main(int argc, char *argv[])
       }
       else if (cli_list.client[cli_num].revents & POLLOUT)
         if (process_bucket_and_send_data(cli_info, &s_info, sockfd,
-            pool) == -1)
+            &pool) == -1)
         {
           close_connection(cli_info, &cli_list, cli_num);
           break;

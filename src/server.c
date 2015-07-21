@@ -108,7 +108,7 @@ int server_socket_init()
   int sockfd;
   struct sockaddr_un server_addr;
 
-  memset(&server_addr, 0 sizeof(server_addr));
+  memset(&server_addr, 0, sizeof(server_addr));
   server_addr.sun_family = AF_UNIX;
   strcpy(server_addr.sun_path, "/tmp/SERVER_SOCKET");
   sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
@@ -125,7 +125,8 @@ int server_socket_init()
  * no client armazena o socket de escuta do servidor
  */
 
-void client_list_init(client_list *cli_list, int listenfd, int max_clients)
+void client_list_init(client_list *cli_list, int listenfd, int max_clients,
+                      int sockfd)
 {
   int i;
   memset(cli_list, 0, sizeof(*cli_list));
@@ -133,7 +134,7 @@ void client_list_init(client_list *cli_list, int listenfd, int max_clients)
   cli_list->client[SERVER_INDEX].fd = listenfd;
   cli_list->client[SERVER_INDEX].events = POLLIN;
   for (i = SERVER_INDEX + 1; i < max_clients; i++)
-    cli_list->client[i].fd = -1;
+    cli_list->client[i].fd = sockfd;
 }
 
 /*!
@@ -171,6 +172,19 @@ static void dec_max_clients(client_list *cli_list, server_info *s_info)
 }
 
 
+/*!
+ * \brief Realiza um shift para a esquerda da estrutura de clientes para
+ * deixar o vetor client paralelo a lista de clientes quando um node é deletado
+ *
+ * param[in] cli_num posicao do vetor client que foi deletada
+ * param[out] cli_list Lista de clientes
+ */
+
+static void shift_client_list(client_list *cli_list, int cli_num)
+{
+  memmove(&cli_list->client[cli_num], &cli_list->client[cli_num + 1],
+         (cli_list->list_len - cli_num) * sizeof(*cli_list->client));
+}
 
 /*!
  * \brief Adiciona um node a lista de clientes, checa a quantidade de clientes
@@ -182,9 +196,13 @@ static void dec_max_clients(client_list *cli_list, server_info *s_info)
  * return NULL se nao conseguir alocar o node
  */
 
-static client_info *list_add(client_list *cli_list, server_info *s_info)
+static client_info *list_add(client_list *cli_list, server_info *s_info,
+                             int sockfd)
 {
+  int cli_num;
   client_info *cli_info;
+
+  cli_num = cli_list->list_len + 1;
 
   cli_info = calloc(1, sizeof(*cli_info));
   if (cli_info == NULL)
@@ -207,24 +225,20 @@ static client_info *list_add(client_list *cli_list, server_info *s_info)
     dec_max_clients(cli_list, s_info);
 
   cli_info->can_send = true;
+  cli_info->sockfd = sockfd;
+
+  if ((set_nonblock(cli_info->sockfd)) == -1)
+  {
+    close(cli_info->sockfd);
+    close(cli_list->client[cli_num].fd);
+    shift_client_list(cli_list, cli_num);
+    return NULL;
+  }
 
   bucket_init(&cli_info->bucket, 0, 50000, s_info->client_rate);
   return cli_info;
 }
 
-/*!
- * \brief Realiza um shift para a esquerda da estrutura de clientes para
- * deixar o vetor client paralelo a lista de clientes quando um node é deletado
- *
- * param[in] cli_num posicao do vetor client que foi deletada
- * param[out] cli_list Lista de clientes
- */
-
-static void shift_client_list(client_list *cli_list, int cli_num)
-{
-  memmove(&cli_list->client[cli_num], &cli_list->client[cli_num + 1],
-         (cli_list->list_len - cli_num) * sizeof(*cli_list->client));
-}
 /*!
  * \brief Seta socket como nonblocking
  *
@@ -255,36 +269,26 @@ int set_nonblock(int sockfd)
 
 int check_connection(client_list *cli_list, int listenfd, server_info *s_info)
 {
-  int i, connfd;
+  int connfd, cli_num;
   socklen_t clilen;
   struct sockaddr_storage cli_addr;
 
-    clilen = sizeof(cli_addr);
-    if((connfd = accept(listenfd, (struct sockaddr *)&cli_addr,
-                        &clilen)) == -1)
-      return -1;
+  cli_num = cli_list->list_len + 1;
 
-    for (i = cli_list->list_len; i < s_info->max_clients; i++)
-    {
-      if (cli_list->client[i].fd == -1)
-      {
-        cli_list->client[i].fd = connfd;
-        if ((set_nonblock(cli_list->client[i].fd)) == -1)
-        {
-          close(cli_list->client[i].fd);
-          shift_client_list(cli_list, i);
-          return -1;
-        }
-        cli_list->client[i].events = POLLIN;
-        if(!(list_add(cli_list, s_info)))
-        {
-          close(cli_list->client[i].fd);
-          shift_client_list(cli_list, i);
-          return -1;
-        }
-        break;
-      }
-    }
+  clilen = sizeof(cli_addr);
+  if((connfd = accept(listenfd, (struct sockaddr *)&cli_addr,
+                        &clilen)) == -1)
+    return -1;
+
+  if(!(list_add(cli_list, s_info, connfd)))
+  {
+    close(cli_list->client[cli_num].fd);
+    shift_client_list(cli_list, cli_num);
+    return -1;
+  }
+
+  cli_list->client[cli_num].events = POLLIN;
+
   return 0;
 }
 
@@ -574,22 +578,23 @@ static int send_http_response(client_info *cli_info, int sockfd, int status)
  * return -1 se der algum erro
  */
 
-static int get_filedata(client_info *cli_info)
+void get_filedata(void *cli_info)
 {
+  client_info *client = (client_info *)cli_info;
   int num_bytes_read = 0;
 
-  if (cli_info->bucket.rate > BUFSIZE)
-    cli_info->bucket.to_be_consumed_tokens = BUFSIZE - 1;
-  else
-    cli_info->bucket.to_be_consumed_tokens = cli_info->bucket.rate;
+ // if (cli_info->bucket.rate > BUFSIZE)
+ //   cli_info->bucket.to_be_consumed_tokens = BUFSIZE - 1;
+ // else
+  //  cli_info->bucket.to_be_consumed_tokens = cli_info->bucket.rate;
 
-  num_bytes_read = fread(cli_info->buffer, 1,
-  cli_info->bucket.to_be_consumed_tokens, cli_info->fp);
+  num_bytes_read = fread(client->buffer, 1,
+  client->bucket.to_be_consumed_tokens, client->fp);
 
-  if (num_bytes_read < 0)
-    return -1;
+ // if (num_bytes_read < 0)
+ //   return -1;
 
-  return num_bytes_read;
+ // return num_bytes_read;
 }
 
 /*!
@@ -663,8 +668,7 @@ int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
     {
       if (cli_info->incomplete_send == 0)
       {
-        add_to_worker(t_pool, (int *)get_filedata(cli_info));
-        cli_info->bucket.to_be_consumed_tokens = get_filedata(cli_info);
+        add_job(t_pool, get_filedata, cli_info);
         bucket_consume(&cli_info->bucket);
       }
       ret = send_requested_data(cli_info, sockfd);
@@ -725,7 +729,6 @@ void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
     cli_list->client[cli_num].events = 0;
   else if (cli_info->header_sent && cli_info->can_send)
     cli_list->client[cli_num].events = POLLOUT;
-
 }
 
 /*!

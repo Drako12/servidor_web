@@ -1,31 +1,40 @@
 #ifndef THREAD_H_INCLUDED
 #define THREAD_H_INCLUDED
 
-#include "server.h"
 #include <pthread.h>
 #include <stdlib.h>
 
 #define NTHREADS 4
 
-
-typedef struct worker_task_
+typedef struct jobs_
 {
-
+  int position;
   void (*function)(void *);
   void *arg;
-  client_info *head;
-  client_info *tail;
-  int len;
+  struct jobs_ *next;
+} jobs;
 
-}worker_task;
+typedef struct job_queue_
+{
+  jobs *head;
+  jobs *tail;
+  int size;
+} job_queue;
 
 typedef struct thread_pool_
 {
   pthread_mutex_t lock;
   pthread_cond_t notify;
   pthread_t pool[NTHREADS];
-  worker_task *client_list;
+  job_queue queue;
   int thread_id;
-  int queue_size;
-}thread_pool;
+} thread_pool;
 
+
+
+int add_job(thread_pool *t_pool, void (*function)(void *), void *arg);
+jobs *get_job(thread_pool *t_pool);
+int do_job(jobs *job, thread_pool *t_pool);
+int create_pool_and_queue_init(thread_pool *t_pool);
+
+#endif
