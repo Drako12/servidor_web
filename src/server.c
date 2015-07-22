@@ -112,6 +112,7 @@ int server_socket_init()
   server_addr.sun_family = AF_UNIX;
   strcpy(server_addr.sun_path, "/tmp/SERVER_SOCKET");
   sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
+  unlink("/tmp/SERVER_SOCKET");
   bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr));
   return sockfd;
 }
@@ -133,8 +134,10 @@ void client_list_init(client_list *cli_list, int listenfd, int max_clients,
   cli_list->client = calloc(max_clients, sizeof(struct pollfd));
   cli_list->client[SERVER_INDEX].fd = listenfd;
   cli_list->client[SERVER_INDEX].events = POLLIN;
-  for (i = SERVER_INDEX + 1; i < max_clients; i++)
-    cli_list->client[i].fd = sockfd;
+  cli_list->client[LOCAL_SOCKET].fd = sockfd;
+  cli_list->client[LOCAL_SOCKET].events = POLLIN;
+  for (i = LOCAL_SOCKET + 1; i < max_clients; i++)
+    cli_list->client[i].fd = -1;
 }
 
 /*!
@@ -171,6 +174,15 @@ static void dec_max_clients(client_list *cli_list, server_info *s_info)
                              s_info->max_clients * sizeof(*cli_list->client));
 }
 
+void get_thread_msg(client_list *cli_list)
+{
+  int num_bytes, s_msg = 0;
+  num_bytes = read(cli_list->client[LOCAL_SOCKET].fd, &s_msg, sizeof(s_msg));
+  if (num_bytes > 0)
+    cli_list->client[s_msg].events = POLLOUT;
+
+}
+
 
 /*!
  * \brief Realiza um shift para a esquerda da estrutura de clientes para
@@ -183,7 +195,7 @@ static void dec_max_clients(client_list *cli_list, server_info *s_info)
 static void shift_client_list(client_list *cli_list, int cli_num)
 {
   memmove(&cli_list->client[cli_num], &cli_list->client[cli_num + 1],
-         (cli_list->list_len - cli_num) * sizeof(*cli_list->client));
+         (cli_list->list_len - cli_num + 1) * sizeof(*cli_list->client));
 }
 
 /*!
@@ -196,8 +208,7 @@ static void shift_client_list(client_list *cli_list, int cli_num)
  * return NULL se nao conseguir alocar o node
  */
 
-static client_info *list_add(client_list *cli_list, server_info *s_info,
-                             int sockfd)
+static client_info *list_add(client_list *cli_list, server_info *s_info)
 {
   int cli_num;
   client_info *cli_info;
@@ -225,11 +236,9 @@ static client_info *list_add(client_list *cli_list, server_info *s_info,
     dec_max_clients(cli_list, s_info);
 
   cli_info->can_send = true;
-  cli_info->sockfd = sockfd;
 
-  if ((set_nonblock(cli_info->sockfd)) == -1)
+  if ((set_nonblock(cli_list->client[cli_num].fd)) == -1)
   {
-    close(cli_info->sockfd);
     close(cli_list->client[cli_num].fd);
     shift_client_list(cli_list, cli_num);
     return NULL;
@@ -273,20 +282,20 @@ int check_connection(client_list *cli_list, int listenfd, server_info *s_info)
   socklen_t clilen;
   struct sockaddr_storage cli_addr;
 
-  cli_num = cli_list->list_len + 1;
+  cli_num = cli_list->list_len + 2;
 
   clilen = sizeof(cli_addr);
   if((connfd = accept(listenfd, (struct sockaddr *)&cli_addr,
                         &clilen)) == -1)
     return -1;
 
-  if(!(list_add(cli_list, s_info, connfd)))
+  if(!(list_add(cli_list, s_info)))
   {
     close(cli_list->client[cli_num].fd);
     shift_client_list(cli_list, cli_num);
     return -1;
   }
-
+  cli_list->client[cli_num].fd = connfd;
   cli_list->client[cli_num].events = POLLIN;
 
   return 0;
@@ -574,27 +583,14 @@ static int send_http_response(client_info *cli_info, int sockfd, int status)
  *
  * param[out] cli_info Node atual
  *
- * return 0 se tudo der certo
- * return -1 se der algum erro
  */
 
 void get_filedata(void *cli_info)
 {
   client_info *client = (client_info *)cli_info;
-  int num_bytes_read = 0;
 
- // if (cli_info->bucket.rate > BUFSIZE)
- //   cli_info->bucket.to_be_consumed_tokens = BUFSIZE - 1;
- // else
-  //  cli_info->bucket.to_be_consumed_tokens = cli_info->bucket.rate;
-
-  num_bytes_read = fread(client->buffer, 1,
+  client->bytes_read = fread(client->buffer, 1,
   client->bucket.to_be_consumed_tokens, client->fp);
-
- // if (num_bytes_read < 0)
- //   return -1;
-
- // return num_bytes_read;
 }
 
 /*!
@@ -611,7 +607,7 @@ static int send_requested_data(client_info *cli_info, int sockfd)
 {
   int ret;
   ret = send(sockfd, cli_info->buffer + cli_info->incomplete_send,
-             cli_info->bucket.to_be_consumed_tokens -
+             cli_info->bytes_read -
              cli_info->incomplete_send, MSG_NOSIGNAL);
 
   if (ret < 0)
@@ -628,7 +624,7 @@ static int send_requested_data(client_info *cli_info, int sockfd)
     return 0;
   }
   cli_info->incomplete_send = 0;
-
+  cli_info->bytes_read = 0;
   return 0;
 
 }
@@ -647,9 +643,10 @@ static int send_requested_data(client_info *cli_info, int sockfd)
  */
 
 int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
-                                 int sockfd, thread_pool *t_pool)
+                                 int sockfd, thread_pool *t_pool,
+                                 client_list *cli_list, int cli_num)
 {
-  int ret;
+  int ret = 0;
 
   if (cli_info->header_sent == false)
   {
@@ -668,10 +665,20 @@ int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
     {
       if (cli_info->incomplete_send == 0)
       {
-        add_job(t_pool, get_filedata, cli_info);
-        bucket_consume(&cli_info->bucket);
+        if (cli_info->bucket.rate > BUFSIZE)
+          cli_info->bucket.to_be_consumed_tokens = BUFSIZE - 1;
+        else
+          cli_info->bucket.to_be_consumed_tokens = cli_info->bucket.rate;
+
+        if (cli_info->bytes_read == 0)
+        {
+          add_job(t_pool, get_filedata, cli_info, cli_num);
+          cli_list->client[cli_num].events = 0;
+          bucket_consume(&cli_info->bucket);
+        }
       }
-      ret = send_requested_data(cli_info, sockfd);
+      if (cli_info->bytes_read > 0)
+        ret = send_requested_data(cli_info, sockfd);
       if (ret == -1)
         return ret;
     }
@@ -729,6 +736,7 @@ void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
     cli_list->client[cli_num].events = 0;
   else if (cli_info->header_sent && cli_info->can_send)
     cli_list->client[cli_num].events = POLLOUT;
+
 }
 
 /*!

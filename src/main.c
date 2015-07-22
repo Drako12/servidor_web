@@ -3,7 +3,6 @@
 #include "thread.h"
 
 int finished = 0;
-pthread_mutex_t g_lock;
 
 void signal_callback_handler(int signum)
 {
@@ -45,7 +44,6 @@ int main(int argc, char *argv[])
 
   client_list_init(&cli_list, listenfd, s_info.max_clients, s_socket);
 
-  pthread_mutex_init(&g_lock, NULL);
   create_pool_and_queue_init(&pool);
 
   while (!finished)
@@ -55,11 +53,8 @@ int main(int argc, char *argv[])
 
     if (cli_list.list_len > 0)
       time_p = &poll_wait;
-//poll pode nao estar setando o revents pq nao tem nada no socket
-// talvez tenha que enviar uma mensagem da thread filha dizendo que esta ok 
-// para trabalhar e assim setando o revents do pollfd?
-//
-    if ((ret = ppoll(cli_list.client, cli_list.list_len + 1, time_p,
+
+    if ((ret = ppoll(cli_list.client, cli_list.list_len + 2, time_p,
                       &sigmask)) < 0)
       continue;
 
@@ -67,18 +62,18 @@ int main(int argc, char *argv[])
       if (check_connection(&cli_list, listenfd, &s_info) == -1 || --ret <= 0)
         continue;
 
+    if(cli_list.client[LOCAL_SOCKET].revents & POLLIN)
+      get_thread_msg(&cli_list);
+
 
     client_info *cli_info = cli_list.head;
-    cli_num = SERVER_INDEX + 1;
+    cli_num = LOCAL_SOCKET + 1;
 
     while (cli_info)
     {
       int sockfd, ret;
 
-      set_clients(cli_info, &cli_list, cli_num);
-      poll_wait = find_poll_wait_time(cli_info, poll_wait);
-
-      sockfd = cli_info->sockfd;
+      sockfd = cli_list.client[cli_num].fd;
 
       if (cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM))
       {
@@ -93,7 +88,7 @@ int main(int argc, char *argv[])
       }
       else if (cli_list.client[cli_num].revents & POLLOUT)
         if (process_bucket_and_send_data(cli_info, &s_info, sockfd,
-            &pool) == -1)
+            &pool, &cli_list, cli_num) == -1)
         {
           close_connection(cli_info, &cli_list, cli_num);
           break;
@@ -104,6 +99,9 @@ int main(int argc, char *argv[])
         close_connection(cli_info, &cli_list, cli_num);
         break;
       }
+
+      set_clients(cli_info, &cli_list, cli_num);
+      poll_wait = find_poll_wait_time(cli_info, poll_wait);
 
       cli_info = cli_info->next;
       cli_num++;

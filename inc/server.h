@@ -34,6 +34,7 @@
 #define MAX_LISTEN 512
 #define MAX_METHOD_LEN 4
 #define SERVER_INDEX 0
+#define LOCAL_SOCKET 1
 #define FORMAT(S)
 #define RESOLVE(S) FORMAT(S)
 #define STR_STATUS FORMAT(MAX_HTTP_STATUS_LEN)
@@ -70,7 +71,7 @@ typedef struct client_info_
   char file_path[PATH_MAX];
   int request_status;
   int incomplete_send;
-  int sockfd;
+  int bytes_read;
   bool header_sent;
   bool can_send;
   FILE *fp;
@@ -91,6 +92,7 @@ int parse_and_fill_server_info(int n_params, char *dir_path, char *port,
                                char *rate, server_info *s_info);
 int server_start_listen(const server_info *s_info);
 void client_list_init(client_list *cli_list, int listenfd, int max_clients, int sockfd);
+void get_thread_msg(client_list *cli_list);
 void close_connection(client_info *cli_info, client_list *cli_list,
                       int cli_num);
 int check_connection(client_list *cli_list, int listenfd, server_info *s_info);
@@ -98,7 +100,8 @@ int process_http_request(client_info *cli_info, const char *dir_path,
                          int sockfd);
 int open_file(client_info *cli_info);
 int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
-                                 int sockfd, thread_pool *t_pool);
+                                 int sockfd, thread_pool *t_pool,
+                                 client_list *cli_list, int cli_num);
 int set_nonblock(int sockfd);
 struct timespec find_poll_wait_time(client_info *cli_info,
                                     struct timespec t_wait);

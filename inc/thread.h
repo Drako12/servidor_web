@@ -7,12 +7,15 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <string.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <errno.h>
 
 #define NTHREADS 4
 
 typedef struct jobs_
 {
-  int position;
+  int cli_num;
   void (*function)(void *);
   void *arg;
   struct jobs_ *next;
@@ -21,7 +24,6 @@ typedef struct jobs_
 typedef struct job_queue_
 {
   jobs *head;
-  jobs *tail;
   int size;
 } job_queue;
 
@@ -29,7 +31,7 @@ typedef struct thread_pool_
 {
   pthread_mutex_t lock;
   pthread_cond_t notify;
-  pthread_t pool[NTHREADS];
+  pthread_t threads[NTHREADS];
   job_queue queue;
   int thread_id;
 } thread_pool;
@@ -37,7 +39,8 @@ typedef struct thread_pool_
 
 
 void *handle_thread(void *pool);
-int add_job(thread_pool *t_pool, void (*function)(void *), void *arg);
+int add_job(thread_pool *t_pool, void (*function)(void *), void *arg,
+            int cli_num);
 jobs *get_job(thread_pool *t_pool);
 int do_job(jobs *job, thread_pool *t_pool);
 int create_pool_and_queue_init(thread_pool *t_pool);
