@@ -3,6 +3,10 @@
 
 #include <pthread.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <string.h>
 
 #define NTHREADS 4
 
@@ -32,6 +36,7 @@ typedef struct thread_pool_
 
 
 
+void *handle_thread(void *pool);
 int add_job(thread_pool *t_pool, void (*function)(void *), void *arg);
 jobs *get_job(thread_pool *t_pool);
 int do_job(jobs *job, thread_pool *t_pool);

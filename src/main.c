@@ -55,7 +55,10 @@ int main(int argc, char *argv[])
 
     if (cli_list.list_len > 0)
       time_p = &poll_wait;
-
+//poll pode nao estar setando o revents pq nao tem nada no socket
+// talvez tenha que enviar uma mensagem da thread filha dizendo que esta ok 
+// para trabalhar e assim setando o revents do pollfd?
+//
     if ((ret = ppoll(cli_list.client, cli_list.list_len + 1, time_p,
                       &sigmask)) < 0)
       continue;

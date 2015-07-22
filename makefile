@@ -1,7 +1,7 @@
 CC = clang
 TARGET = server
 CFLAGS = -Wall -Wextra -g -I$(INCDIR)
-LFLAGS = 
+LFLAGS = -lpthread 
 LINKER = clang -o
 SRCDIR = src
 OBJDIR = obj
