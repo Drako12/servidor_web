@@ -10,10 +10,8 @@ int create_pool_and_queue_init(thread_pool *t_pool)
   pthread_cond_init(&(t_pool->notify), NULL);
 
   for (i = 0; i < NTHREADS; i++)
-  {
-    t_pool->thread_id = i;
     pthread_create(&(t_pool->threads[i]), NULL, handle_thread, t_pool);
-  }
+
 
 return 0;
 }
@@ -49,7 +47,7 @@ void *handle_thread(void *pool)
         func = job->function;
         args = job->arg;
         func(args);
-        write(sockfd, &(job->cli_num), sizeof(int));
+        write(sockfd, &job->arg, sizeof(job->arg));
         free(job);
         pthread_mutex_unlock(&(t_pool->lock));
       }
@@ -58,8 +56,7 @@ void *handle_thread(void *pool)
 }
 
 
-int add_job(thread_pool *t_pool, void (*function)(void *), void *arg,
-            int cli_num)
+int add_job(thread_pool *t_pool, void (*function)(void *), void *arg)
 {
   pthread_mutex_lock(&(t_pool->lock));
 
@@ -79,7 +76,6 @@ int add_job(thread_pool *t_pool, void (*function)(void *), void *arg,
 
   job->function = function;
   job->arg = arg;
-  job->cli_num = cli_num;
   t_pool->queue.size += 1;
 
   pthread_cond_signal(&(t_pool->notify));

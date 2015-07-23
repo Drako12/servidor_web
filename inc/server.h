@@ -72,6 +72,7 @@ typedef struct client_info_
   int request_status;
   int incomplete_send;
   int bytes_read;
+  int sockfd;
   bool header_sent;
   bool can_send;
   FILE *fp;
@@ -94,7 +95,7 @@ int server_start_listen(const server_info *s_info);
 void client_list_init(client_list *cli_list, int listenfd, int max_clients, int sockfd);
 void get_thread_msg(client_list *cli_list);
 void close_connection(client_info *cli_info, client_list *cli_list,
-                      int cli_num, thread_pool *t_pool);
+                      int cli_num);
 int check_connection(client_list *cli_list, int listenfd, server_info *s_info);
 int process_http_request(client_info *cli_info, const char *dir_path,
                          int sockfd);

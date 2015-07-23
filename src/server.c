@@ -176,11 +176,24 @@ static void dec_max_clients(client_list *cli_list, server_info *s_info)
 
 void get_thread_msg(client_list *cli_list)
 {
-  int num_bytes, s_msg = 0;
-  num_bytes = read(cli_list->client[LOCAL_SOCKET].fd, &s_msg, sizeof(s_msg));
-  if (num_bytes > 0)
-    cli_list->client[s_msg].events = POLLOUT;
+  int num_bytes, sockfd;
+  void *s_msg = NULL;
+  client_info *cli;
+  num_bytes = read(cli_list->client[LOCAL_SOCKET].fd, &s_msg,
+                   sizeof(cli_list->head));
+  cli = (client_info *)s_msg;
+  sockfd = cli->sockfd;
 
+  int i;
+  for (i = 2; i <= cli_list->list_len + 2; i++)
+  {
+    if (sockfd == cli_list->client[i].fd)
+    {
+      cli_list->client[i].events = POLLOUT;
+      break;
+    }
+
+  }
 }
 
 
@@ -213,7 +226,7 @@ static client_info *list_add(client_list *cli_list, server_info *s_info)
   int cli_num;
   client_info *cli_info;
 
-  cli_num = cli_list->list_len + 1;
+  cli_num = cli_list->list_len + 2;
 
   cli_info = calloc(1, sizeof(*cli_info));
   if (cli_info == NULL)
@@ -228,6 +241,8 @@ static client_info *list_add(client_list *cli_list, server_info *s_info)
     i->next = cli_info;
   }
   cli_list->list_len++;
+  cli_info->can_send = true;
+  cli_info->sockfd = cli_list->client[cli_num].fd;
 
   if (cli_list->list_len == s_info->max_clients)
     inc_max_clients(cli_list, s_info);
@@ -235,7 +250,6 @@ static client_info *list_add(client_list *cli_list, server_info *s_info)
            cli_list->list_len > NCLIENTS))
     dec_max_clients(cli_list, s_info);
 
-  cli_info->can_send = true;
 
   if ((set_nonblock(cli_list->client[cli_num].fd)) == -1)
   {
@@ -244,7 +258,13 @@ static client_info *list_add(client_list *cli_list, server_info *s_info)
     return NULL;
   }
 
-  bucket_init(&cli_info->bucket, 0, 50000, s_info->client_rate);
+  bucket_init(&cli_info->bucket, 50000, 50000, s_info->client_rate);
+
+  if (cli_info->bucket.rate > BUFSIZE)
+    cli_info->bucket.to_be_consumed_tokens = BUFSIZE - 1;
+  else
+    cli_info->bucket.to_be_consumed_tokens = cli_info->bucket.rate;
+
   return cli_info;
 }
 
@@ -289,14 +309,15 @@ int check_connection(client_list *cli_list, int listenfd, server_info *s_info)
                         &clilen)) == -1)
     return -1;
 
+  cli_list->client[cli_num].fd = connfd;
+  cli_list->client[cli_num].events = POLLIN;
+
   if(!(list_add(cli_list, s_info)))
   {
     close(cli_list->client[cli_num].fd);
     shift_client_list(cli_list, cli_num);
     return -1;
   }
-  cli_list->client[cli_num].fd = connfd;
-  cli_list->client[cli_num].events = POLLIN;
 
   return 0;
 }
@@ -360,34 +381,15 @@ static void list_del(client_info *cli_info, client_list *cli_list)
  * param[out] cli_info node a ser removido
  */
 
-
-//tenho que repensar o shift_client, pois uma thread pode estar tentando ler o
-//arquivo assim que ocorrer o delete/shift, mudando o cli_num do cliente.
-
 void close_connection(client_info *cli_info, client_list *cli_list,
-                      int cli_num, thread_pool *t_pool)
-{   
-  jobs *job;
+                      int cli_num)
+{
   clean_struct(cli_info);
   close(cli_list->client[cli_num].fd);
   shift_client_list(cli_list, cli_num);
-  memset(&cli_list->client[cli_list->list_len + 1], 0, sizeof(*cli_list->client));
+  memset(&cli_list->client[cli_list->list_len + 1], 0,
+         sizeof(*cli_list->client));
   cli_list->client[cli_list->list_len + 1].fd = -1;
-  job = t_pool->queue.head;
-  
-// isso nao funciona tao bem pq a thread pode dar um get_job e mudar o head
-// uma solucao seria fazer a lista com prev e tail, para fazer esse loop
-// voltando do tail pro head , mesmo assim nao tenho certeza se funcionaria
-// a melhor solucao seria se livrar do shift de alguma forma ou nao usar o
-// indice cli_num para saber em qual node nao as threads nao podem ler denovo
-// talvez utilizando o numero do socket
-//
-
-  while(job)
-  {
-    job->cli_num++;
-    job = job->next; 
-  }
   list_del(cli_info, cli_list);
 }
 
@@ -586,7 +588,7 @@ void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
 
   if (!cli_info->can_send)
     cli_list->client[cli_num].events = 0;
-  else if (cli_info->header_sent && cli_info->can_send)
+  else if (cli_info->can_send && cli_list->client[cli_num].events != POLLIN)
     cli_list->client[cli_num].events = POLLOUT;
 
 }
@@ -631,8 +633,6 @@ void get_filedata(void *cli_info)
 
   client->bytes_read = fread(client->buffer, 1,
   client->bucket.to_be_consumed_tokens, client->fp);
-  if (feof(client->fp))
-  printf("lols");
 
 }
 
@@ -661,7 +661,7 @@ static int send_requested_data(client_info *cli_info, int sockfd)
       return -1;
   }
 
-  if (ret != cli_info->bucket.to_be_consumed_tokens)
+  if (ret != cli_info->bytes_read)
   {
     cli_info->incomplete_send = ret;
     return 0;
@@ -708,14 +708,9 @@ int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
     {
       if (cli_info->incomplete_send == 0)
       {
-        if (cli_info->bucket.rate > BUFSIZE)
-          cli_info->bucket.to_be_consumed_tokens = BUFSIZE - 1;
-        else
-          cli_info->bucket.to_be_consumed_tokens = cli_info->bucket.rate;
-
-        if (cli_info->bytes_read == 0)
+        if (cli_info->bytes_read == 0 && !feof(cli_info->fp))
         {
-          add_job(t_pool, get_filedata, cli_info, cli_num);
+          add_job(t_pool, get_filedata, cli_info);
           cli_list->client[cli_num].events = 0;
         }
       }
@@ -724,12 +719,12 @@ int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
         bucket_consume(&cli_info->bucket);
         ret = send_requested_data(cli_info, sockfd);
       }
-   
+
       if (ret == -1)
         return ret;
     }
 
-    if (feof(cli_info->fp))
+    if (feof(cli_info->fp) && cli_info->bytes_read == 0)
       return -1;
   }
 

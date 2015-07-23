@@ -15,7 +15,6 @@
 
 typedef struct jobs_
 {
-  int cli_num;
   void (*function)(void *);
   void *arg;
   struct jobs_ *next;
@@ -33,14 +32,12 @@ typedef struct thread_pool_
   pthread_cond_t notify;
   pthread_t threads[NTHREADS];
   job_queue queue;
-  int thread_id;
 } thread_pool;
 
 
 
 void *handle_thread(void *pool);
-int add_job(thread_pool *t_pool, void (*function)(void *), void *arg,
-            int cli_num);
+int add_job(thread_pool *t_pool, void (*function)(void *), void *arg);
 jobs *get_job(thread_pool *t_pool);
 int do_job(jobs *job, thread_pool *t_pool);
 int create_pool_and_queue_init(thread_pool *t_pool);

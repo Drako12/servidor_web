@@ -81,7 +81,7 @@ int main(int argc, char *argv[])
                                         < 0))
         {
           if (ret == -1)
-            close_connection(cli_info, &cli_list, cli_num, &pool);
+            close_connection(cli_info, &cli_list, cli_num);
           break;
         }
         cli_list.client[cli_num].events = POLLOUT;
@@ -90,19 +90,18 @@ int main(int argc, char *argv[])
         if (process_bucket_and_send_data(cli_info, &s_info, sockfd,
             &pool, &cli_list, cli_num) == -1)
         {
-          close_connection(cli_info, &cli_list, cli_num, &pool);
+          close_connection(cli_info, &cli_list, cli_num);
           break;
         }
 
       if (cli_list.client[cli_num].revents & (POLLERR | POLLHUP | POLLNVAL))
       {
-        close_connection(cli_info, &cli_list, cli_num, &pool);
+        close_connection(cli_info, &cli_list, cli_num);
         break;
       }
 
-      if (cli_info->bytes_read > 0) 
-        set_clients(cli_info, &cli_list, cli_num);
-      
+      //if (cli_info->bytes_read > 0)
+       // set_clients(cli_info, &cli_list, cli_num);
       poll_wait = find_poll_wait_time(cli_info, poll_wait);
       cli_info = cli_info->next;
       cli_num++;
