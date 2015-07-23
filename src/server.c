@@ -360,14 +360,34 @@ static void list_del(client_info *cli_info, client_list *cli_list)
  * param[out] cli_info node a ser removido
  */
 
+
+//tenho que repensar o shift_client, pois uma thread pode estar tentando ler o
+//arquivo assim que ocorrer o delete/shift, mudando o cli_num do cliente.
+
 void close_connection(client_info *cli_info, client_list *cli_list,
-                      int cli_num)
-{
+                      int cli_num, thread_pool *t_pool)
+{   
+  jobs *job;
   clean_struct(cli_info);
   close(cli_list->client[cli_num].fd);
   shift_client_list(cli_list, cli_num);
-  memset(&cli_list->client[cli_list->list_len], 0, sizeof(*cli_list->client));
-  cli_list->client[cli_list->list_len].fd = -1;
+  memset(&cli_list->client[cli_list->list_len + 1], 0, sizeof(*cli_list->client));
+  cli_list->client[cli_list->list_len + 1].fd = -1;
+  job = t_pool->queue.head;
+  
+// isso nao funciona tao bem pq a thread pode dar um get_job e mudar o head
+// uma solucao seria fazer a lista com prev e tail, para fazer esse loop
+// voltando do tail pro head , mesmo assim nao tenho certeza se funcionaria
+// a melhor solucao seria se livrar do shift de alguma forma ou nao usar o
+// indice cli_num para saber em qual node nao as threads nao podem ler denovo
+// talvez utilizando o numero do socket
+//
+
+  while(job)
+  {
+    job->cli_num++;
+    job = job->next; 
+  }
   list_del(cli_info, cli_list);
 }
 
@@ -551,6 +571,26 @@ static char *status_msg(const http_code status)
 
 
 /*!
+ * \brief Seta uma flag na estrutura de clientes para saber se pode ou nao
+ * enviar dados
+ *
+ * \param[in] cli_list Lista de clientes
+ * \param[in] cli_info node de clientes atual
+ * \param[in] cli_num posicao do vetor do pollfd
+ *
+ */
+
+void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
+{
+  cli_info->can_send = bucket_check(&cli_info->bucket);
+
+  if (!cli_info->can_send)
+    cli_list->client[cli_num].events = 0;
+  else if (cli_info->header_sent && cli_info->can_send)
+    cli_list->client[cli_num].events = POLLOUT;
+
+}
+/*!
  * \brief Envia o header da mensagem de resposta de uma conexao
  *
  * param[in] sockfd Socket conectado
@@ -591,6 +631,9 @@ void get_filedata(void *cli_info)
 
   client->bytes_read = fread(client->buffer, 1,
   client->bucket.to_be_consumed_tokens, client->fp);
+  if (feof(client->fp))
+  printf("lols");
+
 }
 
 /*!
@@ -674,11 +717,14 @@ int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
         {
           add_job(t_pool, get_filedata, cli_info, cli_num);
           cli_list->client[cli_num].events = 0;
-          bucket_consume(&cli_info->bucket);
         }
       }
       if (cli_info->bytes_read > 0)
+      {
+        bucket_consume(&cli_info->bucket);
         ret = send_requested_data(cli_info, sockfd);
+      }
+   
       if (ret == -1)
         return ret;
     }
@@ -718,26 +764,6 @@ struct timespec find_poll_wait_time(client_info *cli_info,
   return t_wait;
 }
 
-/*!
- * \brief Seta uma flag na estrutura de clientes para saber se pode ou nao
- * enviar dados
- *
- * \param[in] cli_list Lista de clientes
- * \param[in] cli_info node de clientes atual
- * \param[in] cli_num posicao do vetor do pollfd
- *
- */
-
-void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
-{
-  cli_info->can_send = bucket_check(&cli_info->bucket);
-
-  if (!cli_info->can_send)
-    cli_list->client[cli_num].events = 0;
-  else if (cli_info->header_sent && cli_info->can_send)
-    cli_list->client[cli_num].events = POLLOUT;
-
-}
 
 /*!
  * \brief Faz o cleanup caso o programa se receba um sinal

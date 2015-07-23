@@ -94,7 +94,7 @@ int server_start_listen(const server_info *s_info);
 void client_list_init(client_list *cli_list, int listenfd, int max_clients, int sockfd);
 void get_thread_msg(client_list *cli_list);
 void close_connection(client_info *cli_info, client_list *cli_list,
-                      int cli_num);
+                      int cli_num, thread_pool *t_pool);
 int check_connection(client_list *cli_list, int listenfd, server_info *s_info);
 int process_http_request(client_info *cli_info, const char *dir_path,
                          int sockfd);
@@ -103,10 +103,10 @@ int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
                                  int sockfd, thread_pool *t_pool,
                                  client_list *cli_list, int cli_num);
 int set_nonblock(int sockfd);
+void set_clients(client_info *cli_info, client_list *cli_list, int cli_num);
 struct timespec find_poll_wait_time(client_info *cli_info,
                                     struct timespec t_wait);
 void cleanup(client_list *cli_list);
-void set_clients(client_info *cli_info, client_list *cli_list, int cli_num);
 int server_socket_init();
 void get_filedata(void *cli_info);
 
