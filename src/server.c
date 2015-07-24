@@ -176,20 +176,21 @@ static void dec_max_clients(client_list *cli_list, server_info *s_info)
 
 void get_thread_msg(client_list *cli_list)
 {
-  int num_bytes, sockfd;
+  int num_bytes, sockfd, i;
   void *s_msg = NULL;
   client_info *cli;
+
   num_bytes = read(cli_list->client[LOCAL_SOCKET].fd, &s_msg,
                    sizeof(cli_list->head));
   cli = (client_info *)s_msg;
   sockfd = cli->sockfd;
 
-  int i;
   for (i = 2; i <= cli_list->list_len + 2; i++)
   {
     if (sockfd == cli_list->client[i].fd)
     {
       cli_list->client[i].events = POLLOUT;
+      cli->thread_finished = true;
       break;
     }
 
@@ -588,7 +589,7 @@ void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
 
   if (!cli_info->can_send)
     cli_list->client[cli_num].events = 0;
-  else if (cli_info->can_send && cli_list->client[cli_num].events != POLLIN)
+  else if (cli_info->header_sent && cli_info->thread_finished == true)
     cli_list->client[cli_num].events = POLLOUT;
 
 }
@@ -712,6 +713,7 @@ int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
         {
           add_job(t_pool, get_filedata, cli_info);
           cli_list->client[cli_num].events = 0;
+          cli_info->thread_finished = false;
         }
       }
       if (cli_info->bytes_read > 0)

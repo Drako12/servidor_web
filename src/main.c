@@ -62,9 +62,11 @@ int main(int argc, char *argv[])
       if (check_connection(&cli_list, listenfd, &s_info) == -1 || --ret <= 0)
         continue;
 
-    if(cli_list.client[LOCAL_SOCKET].revents & POLLIN)
+    if (cli_list.client[LOCAL_SOCKET].revents & POLLIN)
+    {
       get_thread_msg(&cli_list);
-
+      continue;
+    }
 
     client_info *cli_info = cli_list.head;
     cli_num = LOCAL_SOCKET + 1;
@@ -73,6 +75,8 @@ int main(int argc, char *argv[])
     {
       int sockfd, ret;
 
+      set_clients(cli_info, &cli_list, cli_num);
+      poll_wait = find_poll_wait_time(cli_info, poll_wait);
       sockfd = cli_list.client[cli_num].fd;
 
       if (cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM))
@@ -100,9 +104,6 @@ int main(int argc, char *argv[])
         break;
       }
 
-      //if (cli_info->bytes_read > 0)
-       // set_clients(cli_info, &cli_list, cli_num);
-      poll_wait = find_poll_wait_time(cli_info, poll_wait);
       cli_info = cli_info->next;
       cli_num++;
     }

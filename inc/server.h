@@ -75,6 +75,7 @@ typedef struct client_info_
   int sockfd;
   bool header_sent;
   bool can_send;
+  bool thread_finished;
   FILE *fp;
   struct client_info_ *next;
   methods method;

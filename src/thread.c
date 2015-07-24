@@ -29,28 +29,26 @@ void *handle_thread(void *pool)
   sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
   connect(sockfd, (struct sockaddr *)&client_addr, sizeof(client_addr));
 
-
-
   while(1)
   {
     pthread_mutex_lock(&(t_pool->lock));
-    pthread_cond_wait(&(t_pool->notify), &(t_pool->lock));
 
-    if(t_pool->queue.size > 0)
+    if (t_pool->queue.size == 0)
+      pthread_cond_wait(&(t_pool->notify), &(t_pool->lock));
+
+    job = get_job(t_pool);
+    pthread_mutex_unlock(&(t_pool->lock));
+
+    if (job)
     {
-      job = get_job(t_pool);
+      void (*func)(void *arg);
+      void *args;
 
-      if(job)
-      {
-        void (*func)(void *arg);
-        void *args;
-        func = job->function;
-        args = job->arg;
-        func(args);
-        write(sockfd, &job->arg, sizeof(job->arg));
-        free(job);
-        pthread_mutex_unlock(&(t_pool->lock));
-      }
+      func = job->function;
+      args = job->arg;
+      func(args);
+      write(sockfd, &job->arg, sizeof(job->arg));
+      free(job);
     }
   }
 }
@@ -58,13 +56,14 @@ void *handle_thread(void *pool)
 
 int add_job(thread_pool *t_pool, void (*function)(void *), void *arg)
 {
-  pthread_mutex_lock(&(t_pool->lock));
-
   jobs *job;
   job = calloc(1, sizeof(*job));
 
+  pthread_mutex_lock(&(t_pool->lock));
   if (t_pool->queue.head == NULL)
+  {
     t_pool->queue.head = job;
+  }
   else
   {
     jobs *i = t_pool->queue.head;
@@ -74,11 +73,13 @@ int add_job(thread_pool *t_pool, void (*function)(void *), void *arg)
     i->next = job;
   }
 
+  t_pool->queue.size += 1;
   job->function = function;
   job->arg = arg;
-  t_pool->queue.size += 1;
 
-  pthread_cond_signal(&(t_pool->notify));
+  if (t_pool->queue.size >= 1)
+    pthread_cond_signal(&(t_pool->notify));
+
   pthread_mutex_unlock(&(t_pool->lock));
 
   return 0;
