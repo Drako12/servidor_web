@@ -29,7 +29,7 @@ void *handle_thread(void *pool)
   sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
   connect(sockfd, (struct sockaddr *)&client_addr, sizeof(client_addr));
 
-  while(1)
+  while (1)
   {
     pthread_mutex_lock(&(t_pool->lock));
 

@@ -74,15 +74,16 @@ int main(int argc, char *argv[])
     while (cli_info)
     {
       int sockfd, ret;
+      
+      sockfd = cli_list.client[cli_num].fd;
 
       set_clients(cli_info, &cli_list, cli_num);
       poll_wait = find_poll_wait_time(cli_info, poll_wait);
-      sockfd = cli_list.client[cli_num].fd;
 
-      if (cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM))
+      if (cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM) && 
+          cli_info->header_sent == false)
       {
-        if ((ret = process_http_request(cli_info, s_info.dir_path, sockfd)
-                                        < 0))
+        if ((ret = process_http_request(cli_info, s_info.dir_path) < 0))
         {
           if (ret == -1)
             close_connection(cli_info, &cli_list, cli_num);
@@ -90,8 +91,10 @@ int main(int argc, char *argv[])
         }
         cli_list.client[cli_num].events = POLLOUT;
       }
-      else if (cli_list.client[cli_num].revents & POLLOUT)
-        if (process_bucket_and_send_data(cli_info, &s_info, sockfd,
+      else if (cli_list.client[cli_num].revents & POLLOUT ||
+               (cli_list.client[cli_num].revents & POLLIN &&
+               cli_info->header_sent == true))
+        if (process_bucket_and_data(cli_info, &s_info,
             &pool, &cli_list, cli_num) == -1)
         {
           close_connection(cli_info, &cli_list, cli_num);

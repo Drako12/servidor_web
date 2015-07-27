@@ -44,6 +44,7 @@
 typedef enum http_code_
 {
   OK = 200,
+  ACCEPTED = 202,
   BAD_REQUEST = 400,
   FORBIDDEN = 403,
   NOT_FOUND = 404,
@@ -73,6 +74,7 @@ typedef struct client_info_
   int incomplete_send;
   int bytes_read;
   int sockfd;
+  int header_size;
   bool header_sent;
   bool can_send;
   bool thread_finished;
@@ -98,18 +100,17 @@ void get_thread_msg(client_list *cli_list);
 void close_connection(client_info *cli_info, client_list *cli_list,
                       int cli_num);
 int check_connection(client_list *cli_list, int listenfd, server_info *s_info);
-int process_http_request(client_info *cli_info, const char *dir_path,
-                         int sockfd);
+int process_http_request(client_info *cli_info, const char *dir_path);
 int open_file(client_info *cli_info);
-int process_bucket_and_send_data(client_info *cli_info, server_info *s_info,
-                                 int sockfd, thread_pool *t_pool,
-                                 client_list *cli_list, int cli_num);
+int process_bucket_and_data(client_info *cli_info, server_info *s_info,
+                                 thread_pool *t_pool, client_list *cli_list,
+                                 int cli_num);
 int set_nonblock(int sockfd);
 void set_clients(client_info *cli_info, client_list *cli_list, int cli_num);
 struct timespec find_poll_wait_time(client_info *cli_info,
                                     struct timespec t_wait);
 void cleanup(client_list *cli_list);
 int server_socket_init();
-void get_filedata(void *cli_info);
+void read_filedata(void *cli_info);
 
 #endif
