@@ -40,6 +40,7 @@
 #define STR_STATUS FORMAT(MAX_HTTP_STATUS_LEN)
 #define STR_METHOD FORMAT(MAX_METHOD_LEN)
 #define STR_PATH FORMAT(PATH_MAX)
+#define ARRAY_LEN(a) sizeof(a)/sizeof(*a)
 
 typedef enum http_code_
 {
@@ -69,6 +70,7 @@ typedef struct server_info_
 typedef struct client_info_
 {
   char *buffer;
+  char header[HEADERSIZE];
   char file_path[PATH_MAX];
   int request_status;
   int incomplete_send;
@@ -76,7 +78,7 @@ typedef struct client_info_
   int sockfd;
   int header_size;
   bool header_sent;
-  bool can_send;
+  bool is_ready;
   bool thread_finished;
   FILE *fp;
   struct client_info_ *next;
@@ -100,7 +102,8 @@ void get_thread_msg(client_list *cli_list);
 void close_connection(client_info *cli_info, client_list *cli_list,
                       int cli_num);
 int check_connection(client_list *cli_list, int listenfd, server_info *s_info);
-int process_http_request(client_info *cli_info, const char *dir_path);
+int process_http_request(client_info *cli_info, const char *dir_path,
+                         thread_pool *t_pool);
 int open_file(client_info *cli_info);
 int process_bucket_and_data(client_info *cli_info, server_info *s_info,
                                  thread_pool *t_pool, client_list *cli_list,
