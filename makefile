@@ -8,7 +8,7 @@ OBJDIR = obj
 BINDIR = bin
 INCDIR = inc
 
-.PHONY: clean tags
+.PHONY: clean
 
 SOURCES  := $(wildcard $(SRCDIR)/*.c)
 INCLUDES := $(wildcard $(INCDIR)/*.h)
@@ -23,7 +23,7 @@ $(OBJECTS): $(OBJDIR)/%.o : $(SRCDIR)/%.c
 	mkdir -p $(OBJDIR)	
 	$(CC) -c $(CFLAGS) $< -o $@
 	cscope -Rbq
-
+	ctags -R
 
 
 clean:

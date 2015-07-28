@@ -505,14 +505,21 @@ static int parse_http_request(client_info *cli_info, const char *dir_path)
   return 0;
 }
 
+static void end_job(client_list *cli_list, client_info *cli_info, int cli_num)
+{
+  cli_list->client[cli_num].events = 0;
+  cli_info->thread_finished = false;
+}
+
 static int get_client_data(client_info *cli_info)
 {
   int nread = 0;
 
   if ((nread = recv(cli_info->sockfd, cli_info->buffer, BUFSIZE - 1, 0)) < 0)
   {
+    //como vou saber diferenciar wouldblock/timeout de acabou o send do cliente
     if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
-      return -2;
+      return -1;
     else
       return -1;
   }
@@ -522,10 +529,11 @@ static int get_client_data(client_info *cli_info)
 
   cli_info->bytes_read = nread;
 
-  return 0;
+  return 1;
 }
 
-static int read_data(client_info *cli_info, thread_pool *t_pool)
+static int read_data(client_info *cli_info, thread_pool *t_pool, 
+                     client_list *cli_list, int cli_num)
 {
   if (!cli_info->header_sent)
   {
@@ -542,12 +550,11 @@ static int read_data(client_info *cli_info, thread_pool *t_pool)
   {
   case GET:
     add_job(t_pool, read_filedata, cli_info);
+    end_job(cli_list, cli_info, cli_num);
     return 0;
     break;
   case PUT:
-    if (get_client_data(cli_info) == -1)
-      return -1;
-    return 1;
+    return get_client_data(cli_info);      
     break;
   }
 }
@@ -565,11 +572,12 @@ static int read_data(client_info *cli_info, thread_pool *t_pool)
  */
 
 int process_http_request(client_info *cli_info, const char *dir_path,
-                         thread_pool *t_pool)
+                         thread_pool *t_pool, client_list *cli_list,
+                         int cli_num)
 {
   int ret;
 
-  ret = read_data(cli_info, t_pool);
+  ret = read_data(cli_info, t_pool, cli_list, cli_num);
 
   if (ret == -1)
     return ret;
@@ -662,7 +670,14 @@ void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
   if (!cli_info->is_ready)
     cli_list->client[cli_num].events = 0;
   else if (cli_info->header_sent && cli_info->thread_finished)
+  {
     cli_list->client[cli_num].events = POLLIN | POLLOUT;
+    if (cli_info->method == PUT)
+    {
+      cli_info->bytes_read = 0;
+      cli_info->header_size = 0;      
+    }
+  }
 
 
 }
@@ -706,28 +721,24 @@ void write_client_data (void *cli_info)
          client->fp);
 }
 
-static void end_job(client_list *cli_list, client_info *cli_info, int cli_num)
-{
-  cli_list->client[cli_num].events = 0;
-  cli_info->thread_finished = false;
-}
 
 
 static int write_data(client_info *cli_info, server_info *s_info,
-                      thread_pool *t_pool)
+                      thread_pool *t_pool, client_list *cli_list, int cli_num)
 {
-  int ret;
-
+  int ret, header_size = 0;
+ 
   if (!cli_info->header_sent)
   {
     if (cli_info->incomplete_send == 0)
     {
       build_header(cli_info, check_request(cli_info, s_info));
+      header_size = strlen(cli_info->header);
       if (cli_info->request_status > ACCEPTED)
         return -1;
     }
     ret = send(cli_info->sockfd, cli_info->header + cli_info->incomplete_send,
-               ARRAY_LEN(cli_info->header) - cli_info->incomplete_send,
+               header_size - cli_info->incomplete_send,
                MSG_NOSIGNAL);
 
     if (ret < 0)
@@ -738,7 +749,7 @@ static int write_data(client_info *cli_info, server_info *s_info,
         return -1;
     }
 
-    if (ret != ARRAY_LEN(cli_info->header))
+    if (ret != header_size)
     {
       cli_info->incomplete_send = ret;
       return 0;
@@ -773,12 +784,12 @@ static int write_data(client_info *cli_info, server_info *s_info,
         cli_info->incomplete_send = ret;
         return 0;
       }
+      cli_info->bytes_read = 0;
       return 1;
       break;
     case PUT:
       add_job(t_pool, write_client_data, cli_info);
-      cli_info->header_size = 0;
-      cli_info->incomplete_send = 0;
+      end_job(cli_list, cli_info, cli_num);
       return 0;
       break;
     }
@@ -809,22 +820,28 @@ int process_bucket_and_data(client_info *cli_info, server_info *s_info,
 
   if (!cli_info->header_sent)
   {
-    write_data(cli_info, s_info, t_pool);
+    write_data(cli_info, s_info, t_pool, cli_list, cli_num);
    // return 0;
   }
 
   if (cli_info->thread_finished)
   {
     int read_ret = 0, write_ret = 0;
-
-    read_ret = read_data(cli_info, t_pool);
-    write_ret = write_data(cli_info, s_info, t_pool);
-    end_job(cli_list, cli_info, cli_num);
-
+    
+    if (cli_info->bytes_read == 0)
+     if ((read_ret = read_data(cli_info, t_pool, cli_list, cli_num)) == -1)
+       return -1;
+    
+    if (cli_info->bytes_read > 0)
+    write_ret = write_data(cli_info, s_info, t_pool, cli_list, cli_num);
+    
     if (read_ret == 1 || write_ret == 1)
-      bucket_consume(&cli_info->bucket);
+    bucket_consume(&cli_info->bucket);
   }
 
+  if (feof(cli_info->fp))
+    return -1;
+ 
   return 0;
 }
 
