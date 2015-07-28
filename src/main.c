@@ -83,18 +83,17 @@ int main(int argc, char *argv[])
       if (cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM) &&
           cli_info->method == 0)
       {
-        if ((ret = process_http_request(cli_info, s_info.dir_path, &pool, 
+        if ((ret = process_http_request(cli_info, s_info.dir_path, &pool,
                                         &cli_list, cli_num) < 0))
         {
           if (ret == -1)
             close_connection(cli_info, &cli_list, cli_num);
           break;
         }
-        cli_list.client[cli_num].events = POLLOUT | POLLIN;
+        build_and_send_header(cli_info, s_info.dir_path);
       }
       else if (cli_list.client[cli_num].revents & (POLLOUT | POLLIN))
-        if (process_bucket_and_data(cli_info, &s_info, &pool, &cli_list,
-            cli_num) == -1)
+        if (process_bucket_and_data(cli_info, &pool, &cli_list, cli_num) == -1)
         {
           close_connection(cli_info, &cli_list, cli_num);
           break;
@@ -111,7 +110,7 @@ int main(int argc, char *argv[])
     }
   }
 
-cleanup(&cli_list);
-return 0;
+  cleanup(&cli_list);
+  return 0;
 }
 

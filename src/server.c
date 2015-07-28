@@ -195,6 +195,8 @@ void get_thread_msg(client_list *cli_list)
       break;
     }
   }
+      cli->bytes_read = 0;
+      cli->header_size = 0;
  //  if(method = put)
    //  cli_info->bytes_read = 0;
 }
@@ -230,6 +232,7 @@ static int set_client_struct(client_info *cli_info, client_list *cli_list,
   else
     cli_info->bucket.to_be_consumed_tokens = cli_info->bucket.rate;
 
+  cli_info->bytes_write = cli_info->bucket.to_be_consumed_tokens;
   return 0;
 }
 /*!
@@ -326,7 +329,7 @@ int check_connection(client_list *cli_list, int listenfd, server_info *s_info)
     return -1;
 
   cli_list->client[cli_num].fd = connfd;
-  cli_list->client[cli_num].events = POLLIN;
+  cli_list->client[cli_num].events = POLLIN | POLLOUT;
 
   if(!(list_add(cli_list, s_info)))
   {
@@ -420,14 +423,14 @@ void close_connection(client_info *cli_info, client_list *cli_list,
  * return -1 se der algum erro
  */
 
-int check_request(client_info *cli_info, server_info *s_info)
+static int check_request(client_info *cli_info, const char *dir_path)
 {
   switch (cli_info->method)
   {
     case GET:
 
-    if (strncmp(cli_info->file_path, s_info->dir_path,
-              strlen(s_info->dir_path)) != 0)
+    if (strncmp(cli_info->file_path, dir_path,
+              strlen(dir_path)) != 0)
       return cli_info->request_status = FORBIDDEN;
 
     if (access(cli_info->file_path, R_OK) == 0)
@@ -439,8 +442,8 @@ int check_request(client_info *cli_info, server_info *s_info)
 
     case PUT:
 
-    if (strncmp(cli_info->file_path, s_info->dir_path,
-              strlen(s_info->dir_path)) != 0)
+    if (strncmp(cli_info->file_path, dir_path,
+              strlen(dir_path)) != 0)
       return cli_info->request_status = FORBIDDEN;
     else
       return cli_info->request_status = ACCEPTED;
@@ -459,14 +462,12 @@ static int check_header_end(client_info *cli_info)
   if ((header_aux =  strstr(cli_info->buffer,"\r\n\r\n")) != NULL)
   {
     num_bytes_header = header_aux - cli_info->buffer + 4;
-    cli_info->bytes_read -= num_bytes_header;
     return num_bytes_header;
   }
 
  if ((header_aux =  strstr(cli_info->buffer,"\n\n")) != NULL)
   {
     num_bytes_header = header_aux - cli_info->buffer + 2;
-    cli_info->bytes_read -= num_bytes_header;
     return num_bytes_header;
   }
 
@@ -485,16 +486,20 @@ static int check_header_end(client_info *cli_info)
 
 static int parse_http_request(client_info *cli_info, const char *dir_path)
 {
-  int ret;
   char path[PATH_MAX], method[MAX_METHOD_LEN];
-
+ // char *content;
   strcpy(path, dir_path);
   strcat(path, "/");
 
-  if ((ret = sscanf(cli_info->buffer, "%"STR_METHOD"s %"STR_PATH"s",
-                    method, path + strlen(path))) != 2)
+  if (sscanf(cli_info->buffer, "%"STR_METHOD"s %"STR_PATH"s", method,
+             path + strlen(path)) != 2)
     return -1;
 
+/*  content = strstr(cli_info->buffer, "Content-Length");
+  if (content != NULL);
+    if (sscanf(content, "Content-Length: %ld", &cli_info->content_length) != 1)
+      return -1;
+*/
   realpath(path, cli_info->file_path);
   if (strcmp(method, "PUT") == 0)
     cli_info->method = PUT;
@@ -515,11 +520,11 @@ static int get_client_data(client_info *cli_info)
 {
   int nread = 0;
 
-  if ((nread = recv(cli_info->sockfd, cli_info->buffer, BUFSIZE - 1, 0)) < 0)
+  if ((nread = recv(cli_info->sockfd, cli_info->buffer,
+                    cli_info->bucket.to_be_consumed_tokens, 0)) < 0)
   {
-    //como vou saber diferenciar wouldblock/timeout de acabou o send do cliente
     if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
-      return -1;
+      return -2;
     else
       return -1;
   }
@@ -532,7 +537,7 @@ static int get_client_data(client_info *cli_info)
   return 1;
 }
 
-static int read_data(client_info *cli_info, thread_pool *t_pool, 
+static int read_data(client_info *cli_info, thread_pool *t_pool,
                      client_list *cli_list, int cli_num)
 {
   if (!cli_info->header_sent)
@@ -554,64 +559,35 @@ static int read_data(client_info *cli_info, thread_pool *t_pool,
     return 0;
     break;
   case PUT:
-    return get_client_data(cli_info);      
+    return get_client_data(cli_info);
     break;
   }
 }
 
-/*!
- * \brief Faz o processamento do request HTTP
- *
- * param[in] sockfd socket connectado
- * param[in] cli_info Node atual
- * param[in] dir_path path do diretorio raiz do servidor
- *
- * return ret 0 para tudo ok, -1 para erro no request -2 caso socket esteja
- * vazio
- *
- */
-
-int process_http_request(client_info *cli_info, const char *dir_path,
-                         thread_pool *t_pool, client_list *cli_list,
-                         int cli_num)
+static int send_to_client(client_info *cli_info, char *buffer, int buf_size)
 {
-  int ret;
+  int bytes_sent;
 
-  ret = read_data(cli_info, t_pool, cli_list, cli_num);
+  bytes_sent = send(cli_info->sockfd, buffer + cli_info->partial_send,
+               buf_size - cli_info->partial_send, MSG_NOSIGNAL);
 
-  if (ret == -1)
-    return ret;
-
-  if (ret == 0)
-    return parse_http_request(cli_info, dir_path);
-
-  return ret;
-}
-
-/*!
- * \brief Abre o arquivo de acordo com o path do node atual
- *
- * param[out] cli_info Node atual
- */
-//FALTA CHECAR SE O ARQUIVO JA ESTA SENDO ENVIANDO PARA NAO FAZER PUT EM CIMA
-//DELE OU TENTAR DAR GET EM UM PUT
-
-int open_file(client_info *cli_info)
-{
-  if (cli_info->method == GET)
+  if (bytes_sent < 0)
   {
-    cli_info->fp = fopen(cli_info->file_path, "rb");
-    if (cli_info->fp == NULL)
-      return -1;
-  }
-  else if (cli_info->method == PUT)
-  {
-    cli_info->fp = fopen(cli_info->file_path, "w");
-    if (cli_info->fp == NULL)
+    if (errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN)
+      return 0;
+    else
       return -1;
   }
 
-  return 0;
+  if (bytes_sent != buf_size)
+  {
+    cli_info->partial_send += bytes_sent;
+    return 0;
+  }
+
+  cli_info->partial_send = 0;
+
+  return 1;
 }
 
 /*!
@@ -653,6 +629,99 @@ static char *status_msg(const http_code status)
   return NULL;
 }
 
+/*!
+ * \brief Escreve o header da mensagem de resposta de uma conexao
+ *
+ * param[in] status numero do status http
+ * param[out] cli_info Node atual
+ *
+ */
+
+static void build_header(client_info *cli_info, int status)
+{
+    snprintf(cli_info->header, sizeof(cli_info->header),
+    "HTTP/1.0 %d %s\r\n\r\n", status, status_msg(status));
+}
+
+/*!
+ * \brief Faz o processamento do request HTTP
+ *
+ * param[in] sockfd socket connectado
+ * param[in] cli_info Node atual
+ * param[in] dir_path path do diretorio raiz do servidor
+ *
+ * return ret 0 para tudo ok, -1 para erro no request -2 caso socket esteja
+ * vazio
+ *
+ */
+
+int process_http_request(client_info *cli_info, const char *dir_path,
+                         thread_pool *t_pool, client_list *cli_list,
+                         int cli_num)
+{
+  int ret;
+
+  ret = read_data(cli_info, t_pool, cli_list, cli_num);
+
+  if (ret == -1)
+    return ret;
+
+  if (ret == 0)
+    return parse_http_request(cli_info, dir_path);
+
+  return ret;
+}
+
+int build_and_send_header(client_info *cli_info, const char *dir_path)
+{
+  int ret, header_size = 0;
+
+  if (cli_info->partial_send == 0)
+  {
+    build_header(cli_info, check_request(cli_info, dir_path));
+    header_size = strlen(cli_info->header);
+    if (cli_info->request_status > ACCEPTED)
+      return -1;
+  }
+
+  ret = send_to_client(cli_info, cli_info->header, header_size);
+
+  if (ret > 0)
+  {
+    cli_info->header_sent = true;
+    open_file(cli_info);
+    return 0;
+  }
+
+  return 0;
+}
+/*!
+ * \brief Abre o arquivo de acordo com o path do node atual
+ *
+ * param[out] cli_info Node atual
+ */
+//FALTA CHECAR SE O ARQUIVO JA ESTA SENDO ENVIANDO PARA NAO FAZER PUT EM CIMA
+//DELE OU TENTAR DAR GET EM UM PUT
+
+int open_file(client_info *cli_info)
+{
+  if (cli_info->method == GET)
+  {
+    cli_info->fp = fopen(cli_info->file_path, "rb");
+    if (cli_info->fp == NULL)
+      return -1;
+  }
+  else if (cli_info->method == PUT)
+  {
+    cli_info->fp = fopen(cli_info->file_path, "w");
+    if (cli_info->fp == NULL)
+      return -1;
+  }
+
+  return 0;
+}
+
+
 
 /*!
  * \brief Seta events como 0 caso nao possa enviar dados
@@ -674,25 +743,12 @@ void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
     cli_list->client[cli_num].events = POLLIN | POLLOUT;
     if (cli_info->method == PUT)
     {
-      cli_info->bytes_read = 0;
-      cli_info->header_size = 0;      
+      //cli_info->bytes_read = 0;
+     // cli_info->header_size = 0;
     }
   }
 
 
-}
-/*!
- * \brief Escreve o header da mensagem de resposta de uma conexao
- *
- * param[in] status numero do status http
- * param[out] cli_info Node atual
- *
- */
-
-static void build_header(client_info *cli_info, int status)
-{
-    snprintf(cli_info->header, sizeof(cli_info->header),
-    "HTTP/1.0 %d %s\r\n\r\n", status, status_msg(status));
 }
 
 /*!
@@ -708,92 +764,39 @@ void read_filedata(void *cli_info)
 
   client->bytes_read = fread(client->buffer, 1,
   client->bucket.to_be_consumed_tokens, client->fp);
-
 }
-
-
 
 void write_client_data (void *cli_info)
 {
   client_info *client = (client_info *)cli_info;
 
-  fwrite(client->buffer + client->header_size, 1, client->bytes_read,
-         client->fp);
+  client->bytes_write = fwrite(client->buffer + client->header_size, 1,
+                        client->bytes_read - client->header_size, client->fp);
 }
 
 
-
-static int write_data(client_info *cli_info, server_info *s_info,
-                      thread_pool *t_pool, client_list *cli_list, int cli_num)
+static int write_data(client_info *cli_info, thread_pool *t_pool,
+                      client_list *cli_list, int cli_num)
 {
-  int ret, header_size = 0;
- 
-  if (!cli_info->header_sent)
+  int ret;
+
+  switch (cli_info->method)
   {
-    if (cli_info->incomplete_send == 0)
-    {
-      build_header(cli_info, check_request(cli_info, s_info));
-      header_size = strlen(cli_info->header);
-      if (cli_info->request_status > ACCEPTED)
-        return -1;
-    }
-    ret = send(cli_info->sockfd, cli_info->header + cli_info->incomplete_send,
-               header_size - cli_info->incomplete_send,
-               MSG_NOSIGNAL);
+  case GET:
+    ret = send_to_client(cli_info, cli_info->buffer, cli_info->bytes_read);
 
-    if (ret < 0)
-    {
-      if (errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN)
-        return 0;
-      else
-        return -1;
-    }
-
-    if (ret != header_size)
-    {
-      cli_info->incomplete_send = ret;
+    if (ret == 1)
       return 0;
-    }
-
-    if (ret > 0)
-    {
-      cli_info->header_sent = true;
-      open_file(cli_info);
-      return 0;
-    }
+    cli_info->bytes_read = 0;
+    return ret;
+    break;
+  case PUT:
+    add_job(t_pool, write_client_data, cli_info);
+    end_job(cli_list, cli_info, cli_num);
+    return 0;
+    break;
   }
-  else
-  {
-    switch(cli_info->method)
-    {
-    case GET:
-      ret = send(cli_info->sockfd, cli_info->buffer +
-      cli_info->incomplete_send, cli_info->bytes_read -
-      cli_info->incomplete_send, MSG_NOSIGNAL);
 
-      if (ret < 0)
-      {
-        if (errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN)
-          return 0;
-        else
-          return -1;
-      }
-
-      if (ret != cli_info->bytes_read)
-      {
-        cli_info->incomplete_send = ret;
-        return 0;
-      }
-      cli_info->bytes_read = 0;
-      return 1;
-      break;
-    case PUT:
-      add_job(t_pool, write_client_data, cli_info);
-      end_job(cli_list, cli_info, cli_num);
-      return 0;
-      break;
-    }
-  }
 
   return 0;
 }
@@ -809,39 +812,33 @@ static int write_data(client_info *cli_info, server_info *s_info,
  * return 0 se o envio for correto e nao tiver terminado
  * return -1 se der algum erro ou tiver terminado o envio
  */
-int process_bucket_and_data(client_info *cli_info, server_info *s_info,
-                            thread_pool *t_pool, client_list *cli_list,
-                            int cli_num)
+int process_bucket_and_data(client_info *cli_info, thread_pool *t_pool,
+                            client_list *cli_list, int cli_num)
 {
   cli_info->is_ready = bucket_check(&cli_info->bucket);
 
   if (!cli_info->is_ready)
     return 0;
 
-  if (!cli_info->header_sent)
-  {
-    write_data(cli_info, s_info, t_pool, cli_list, cli_num);
-   // return 0;
-  }
-
   if (cli_info->thread_finished)
   {
     int read_ret = 0, write_ret = 0;
-    
+
     if (cli_info->bytes_read == 0)
      if ((read_ret = read_data(cli_info, t_pool, cli_list, cli_num)) == -1)
        return -1;
-    
+
     if (cli_info->bytes_read > 0)
-    write_ret = write_data(cli_info, s_info, t_pool, cli_list, cli_num);
-    
+      write_ret = write_data(cli_info, t_pool, cli_list, cli_num);
+
     if (read_ret == 1 || write_ret == 1)
-    bucket_consume(&cli_info->bucket);
+      bucket_consume(&cli_info->bucket);
   }
 
-  if (feof(cli_info->fp))
+  if (feof(cli_info->fp) || (cli_info->thread_finished &&
+      !(cli_list->client[cli_num].revents & POLLIN)))
     return -1;
- 
+
   return 0;
 }
 
