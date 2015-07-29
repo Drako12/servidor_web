@@ -283,7 +283,7 @@ static client_info *list_add(client_list *cli_list, server_info *s_info)
 
   if (set_client_struct(cli_info, cli_list, cli_num) == -1)
     return NULL;
-
+  
   return cli_info;
 }
 
@@ -545,11 +545,10 @@ static int read_data(client_info *cli_info, thread_pool *t_pool,
     if (get_client_data(cli_info) == -1)
       return -1;
     cli_info->header_size = check_header_end(cli_info);
-    return 0;
+    return cli_info->header_size;
   }
 
-  if (cli_info->bytes_read != 0)
-    return 0;
+  cli_info->header_size = 0;
 
   switch (cli_info->method)
   {
@@ -562,6 +561,7 @@ static int read_data(client_info *cli_info, thread_pool *t_pool,
     return get_client_data(cli_info);
     break;
   }
+  return -1;
 }
 
 static int send_to_client(client_info *cli_info, char *buffer, int buf_size)
@@ -705,18 +705,14 @@ int build_and_send_header(client_info *cli_info, const char *dir_path)
 
 int open_file(client_info *cli_info)
 {
-  if (cli_info->method == GET)
-  {
-    cli_info->fp = fopen(cli_info->file_path, "rb");
-    if (cli_info->fp == NULL)
-      return -1;
-  }
-  else if (cli_info->method == PUT)
-  {
-    cli_info->fp = fopen(cli_info->file_path, "w");
-    if (cli_info->fp == NULL)
-      return -1;
-  }
+  char foptions[2] = "rb";
+
+  if (cli_info->method == PUT)
+    strcpy(foptions,"w");
+
+  cli_info->fp = fopen(cli_info->file_path, foptions);
+  if (cli_info->fp == NULL)
+    return -1;
 
   return 0;
 }
@@ -741,11 +737,11 @@ void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
   else if (cli_info->header_sent && cli_info->thread_finished)
   {
     cli_list->client[cli_num].events = POLLIN | POLLOUT;
-    if (cli_info->method == PUT)
+    /*if (cli_info->method == PUT && cli_info->bytes_write > 0)
     {
-      //cli_info->bytes_read = 0;
-     // cli_info->header_size = 0;
-    }
+      cli_info->bytes_read = 0;
+      cli_info->header_size = 0;
+    }*/
   }
 
 
@@ -824,19 +820,19 @@ int process_bucket_and_data(client_info *cli_info, thread_pool *t_pool,
   {
     int read_ret = 0, write_ret = 0;
 
-    if (cli_info->bytes_read == 0)
+    if (cli_info->bytes_read - cli_info->header_size == 0)
      if ((read_ret = read_data(cli_info, t_pool, cli_list, cli_num)) == -1)
        return -1;
-
-    if (cli_info->bytes_read > 0)
+    
+    if (cli_info->bytes_read - cli_info->header_size > 0 && read_ret != -2)
       write_ret = write_data(cli_info, t_pool, cli_list, cli_num);
 
     if (read_ret == 1 || write_ret == 1)
       bucket_consume(&cli_info->bucket);
   }
 
-  if (feof(cli_info->fp) || (cli_info->thread_finished &&
-      !(cli_list->client[cli_num].revents & POLLIN)))
+  if (feof(cli_info->fp) || (cli_info->bytes_write + cli_info->header_size
+                             < cli_info->bucket.to_be_consumed_tokens))
     return -1;
 
   return 0;

@@ -92,7 +92,8 @@ int main(int argc, char *argv[])
         }
         build_and_send_header(cli_info, s_info.dir_path);
       }
-      else if (cli_list.client[cli_num].revents & (POLLOUT | POLLIN))
+      else if ((cli_list.client[cli_num].revents & (POLLOUT | POLLIN)) &&
+               cli_info->header_sent)
         if (process_bucket_and_data(cli_info, &pool, &cli_list, cli_num) == -1)
         {
           close_connection(cli_info, &cli_list, cli_num);
