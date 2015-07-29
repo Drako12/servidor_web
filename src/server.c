@@ -195,12 +195,11 @@ void get_thread_msg(client_list *cli_list)
       break;
     }
   }
-      cli->bytes_read = 0;
-      cli->header_size = 0;
- //  if(method = put)
-   //  cli_info->bytes_read = 0;
-}
+  if (cli->method == PUT)
+    cli->bytes_read = 0;
+  cli->header_size = 0;
 
+}
 
 /*!
  * \brief Realiza um shift para a esquerda da estrutura de clientes para
@@ -283,7 +282,7 @@ static client_info *list_add(client_list *cli_list, server_info *s_info)
 
   if (set_client_struct(cli_info, cli_list, cli_num) == -1)
     return NULL;
-  
+
   return cli_info;
 }
 
@@ -423,11 +422,23 @@ void close_connection(client_info *cli_info, client_list *cli_list,
  * return -1 se der algum erro
  */
 
-static int check_request(client_info *cli_info, const char *dir_path)
+static int check_request(client_info *cli_info, const char *dir_path,
+                         client_list *cli_list)
 {
+  client_info *i = cli_list->head;
+
   switch (cli_info->method)
   {
-    case GET:
+
+  case GET:
+
+    while (i->next)
+    {
+      if (i->method == PUT && i != cli_info)
+        if (i->file_path == cli_info->file_path)
+          return cli_info->request_status = FORBIDDEN;
+      i = i->next;
+    }
 
     if (strncmp(cli_info->file_path, dir_path,
               strlen(dir_path)) != 0)
@@ -440,8 +451,15 @@ static int check_request(client_info *cli_info, const char *dir_path)
 
     break;
 
-    case PUT:
+  case PUT:
 
+    while (i->next)
+    {
+      if (i->method == PUT && i != cli_info)
+        if (i->file_path == cli_info->file_path)
+          return cli_info->request_status = FORBIDDEN;
+      i = i->next;
+    }
     if (strncmp(cli_info->file_path, dir_path,
               strlen(dir_path)) != 0)
       return cli_info->request_status = FORBIDDEN;
@@ -487,7 +505,7 @@ static int check_header_end(client_info *cli_info)
 static int parse_http_request(client_info *cli_info, const char *dir_path)
 {
   char path[PATH_MAX], method[MAX_METHOD_LEN];
- // char *content;
+  char *content;
   strcpy(path, dir_path);
   strcat(path, "/");
 
@@ -495,17 +513,16 @@ static int parse_http_request(client_info *cli_info, const char *dir_path)
              path + strlen(path)) != 2)
     return -1;
 
-/*  content = strstr(cli_info->buffer, "Content-Length");
+  content = strstr(cli_info->buffer, "Content-Length");
   if (content != NULL);
     if (sscanf(content, "Content-Length: %ld", &cli_info->content_length) != 1)
       return -1;
-*/
+
   realpath(path, cli_info->file_path);
   if (strcmp(method, "PUT") == 0)
     cli_info->method = PUT;
   if (strcmp(method, "GET") == 0)
     cli_info->method = GET;
-
 
   return 0;
 }
@@ -521,18 +538,21 @@ static int get_client_data(client_info *cli_info)
   int nread = 0;
 
   if ((nread = recv(cli_info->sockfd, cli_info->buffer,
-                    cli_info->bucket.to_be_consumed_tokens, 0)) < 0)
+                    cli_info->bucket.to_be_consumed_tokens, 0)) <= 0)
   {
     if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
+    {
+      cli_info->empty_socket_count++;
       return -2;
+    }
     else
       return -1;
   }
 
-  if (nread <= 0)
-    return -1;
+  cli_info->empty_socket_count = 0;
 
   cli_info->bytes_read = nread;
+  cli_info->header_size = 0;
 
   return 1;
 }
@@ -548,7 +568,6 @@ static int read_data(client_info *cli_info, thread_pool *t_pool,
     return cli_info->header_size;
   }
 
-  cli_info->header_size = 0;
 
   switch (cli_info->method)
   {
@@ -666,19 +685,20 @@ int process_http_request(client_info *cli_info, const char *dir_path,
   if (ret == -1)
     return ret;
 
-  if (ret == 0)
+  if (ret > 0)
     return parse_http_request(cli_info, dir_path);
 
   return ret;
 }
 
-int build_and_send_header(client_info *cli_info, const char *dir_path)
+int build_and_send_header(client_info *cli_info, client_list *cli_list,
+                          const char *dir_path)
 {
   int ret, header_size = 0;
 
   if (cli_info->partial_send == 0)
   {
-    build_header(cli_info, check_request(cli_info, dir_path));
+    build_header(cli_info, check_request(cli_info, dir_path, cli_list));
     header_size = strlen(cli_info->header);
     if (cli_info->request_status > ACCEPTED)
       return -1;
@@ -689,6 +709,10 @@ int build_and_send_header(client_info *cli_info, const char *dir_path)
   if (ret > 0)
   {
     cli_info->header_sent = true;
+
+    if (cli_info->header_size == cli_info->bytes_read)
+      cli_info->bytes_read = 0;
+
     open_file(cli_info);
     return 0;
   }
@@ -700,8 +724,6 @@ int build_and_send_header(client_info *cli_info, const char *dir_path)
  *
  * param[out] cli_info Node atual
  */
-//FALTA CHECAR SE O ARQUIVO JA ESTA SENDO ENVIANDO PARA NAO FAZER PUT EM CIMA
-//DELE OU TENTAR DAR GET EM UM PUT
 
 int open_file(client_info *cli_info)
 {
@@ -735,14 +757,8 @@ void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
   if (!cli_info->is_ready)
     cli_list->client[cli_num].events = 0;
   else if (cli_info->header_sent && cli_info->thread_finished)
-  {
     cli_list->client[cli_num].events = POLLIN | POLLOUT;
-    /*if (cli_info->method == PUT && cli_info->bytes_write > 0)
-    {
-      cli_info->bytes_read = 0;
-      cli_info->header_size = 0;
-    }*/
-  }
+
 
 
 }
@@ -781,12 +797,13 @@ static int write_data(client_info *cli_info, thread_pool *t_pool,
   case GET:
     ret = send_to_client(cli_info, cli_info->buffer, cli_info->bytes_read);
 
-    if (ret == 1)
+    if (ret == -1)
       return 0;
     cli_info->bytes_read = 0;
     return ret;
     break;
   case PUT:
+    cli_info->bytes_write = cli_info->bucket.to_be_consumed_tokens;
     add_job(t_pool, write_client_data, cli_info);
     end_job(cli_list, cli_info, cli_num);
     return 0;
@@ -820,20 +837,19 @@ int process_bucket_and_data(client_info *cli_info, thread_pool *t_pool,
   {
     int read_ret = 0, write_ret = 0;
 
-    if (cli_info->bytes_read - cli_info->header_size == 0)
+    if (cli_info->bytes_read == 0)
      if ((read_ret = read_data(cli_info, t_pool, cli_list, cli_num)) == -1)
        return -1;
-    
-    if (cli_info->bytes_read - cli_info->header_size > 0 && read_ret != -2)
+
+    if (cli_info->bytes_read > 0)
       write_ret = write_data(cli_info, t_pool, cli_list, cli_num);
 
     if (read_ret == 1 || write_ret == 1)
       bucket_consume(&cli_info->bucket);
-  }
 
-  if (feof(cli_info->fp) || (cli_info->bytes_write + cli_info->header_size
-                             < cli_info->bucket.to_be_consumed_tokens))
-    return -1;
+    if (feof(cli_info->fp) || ftell(cli_info->fp) == cli_info->content_length)
+      return -1;
+  }
 
   return 0;
 }

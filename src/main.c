@@ -80,8 +80,8 @@ int main(int argc, char *argv[])
       set_clients(cli_info, &cli_list, cli_num);
       poll_wait = find_poll_wait_time(cli_info, poll_wait);
 
-      if (cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM) &&
-          cli_info->method == 0)
+      if (cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM | POLLOUT)
+          && cli_info->method == 0)
       {
         if ((ret = process_http_request(cli_info, s_info.dir_path, &pool,
                                         &cli_list, cli_num) < 0))
@@ -90,7 +90,7 @@ int main(int argc, char *argv[])
             close_connection(cli_info, &cli_list, cli_num);
           break;
         }
-        build_and_send_header(cli_info, s_info.dir_path);
+        build_and_send_header(cli_info, &cli_list, s_info.dir_path);
       }
       else if ((cli_list.client[cli_num].revents & (POLLOUT | POLLIN)) &&
                cli_info->header_sent)

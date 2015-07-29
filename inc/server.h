@@ -81,6 +81,7 @@ typedef struct client_info_
   int bytes_write;
   int sockfd;
   int header_size;
+  int empty_socket_count;
   long content_length;
   bool header_sent;
   bool is_ready;
@@ -110,7 +111,8 @@ int check_connection(client_list *cli_list, int listenfd, server_info *s_info);
 int process_http_request(client_info *cli_info, const char *dir_path,
                          thread_pool *t_pool, client_list *cli_list,
                          int cli_num);
-int build_and_send_header(client_info *cli_info, const char *dir_path);
+int build_and_send_header(client_info *cli_info, client_list *cli_list,
+                          const char *dir_path);
 int open_file(client_info *cli_info);
 int process_bucket_and_data(client_info *cli_info, thread_pool *t_pool,
                             client_list *cli_list, int cli_num);
