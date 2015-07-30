@@ -1,5 +1,85 @@
 #include "server.h"
 
+int save_pid_file()
+{
+  FILE *fp;
+
+  if((fp = fopen("server.pid", "w+")) == NULL)
+  {
+    fprintf(stderr, "Error opening file");
+    return -1;
+  }
+
+  fprintf(fp, "%d", getpid());
+  fclose(fp);
+
+return 0;
+}
+
+static void change_port(server_info *s_info, client_list *cli_list,
+                        int listenfd, char *iniLine)
+{
+  strcpy(s_info->port, iniLine + 7);
+  listenfd = server_start_listen(s_info);
+  cli_list->client[SERVER_INDEX].fd = listenfd;
+  cli_list->client[SERVER_INDEX].events = POLLIN;
+
+}
+
+static void change_path(server_info *s_info, char *iniLine)
+{
+  strcpy(s_info->dir_path, iniLine + 7);
+}
+
+static void change_rate(server_info *s_info, char *iniLine, client_info *cli)
+{
+  double rate;
+
+  rate = atof(iniLine + 7);
+  s_info->client_rate = rate;
+
+  while (cli->next)
+  {
+    cli->bucket.rate = rate;
+    if (s_info->client_rate < BUFSIZE)
+      cli->bucket.to_be_consumed_tokens = cli->bucket.rate;
+    cli = cli->next;
+  }
+}
+
+void change_settings(client_list *cli_list, int listenfd,
+                     volatile int *settings, server_info *s_info)
+{
+  char iniLine[MAX_INI_LINE];
+  char *line_aux;
+  FILE *iniFile;
+  client_info *cli = cli_list->head;
+  settings = 0;
+
+  if ((iniFile = fopen("server.ini", "r")) == NULL)
+    fprintf(stderr, "Ini file not found");
+
+
+  while (fgets(iniLine, sizeof(iniLine), iniFile))
+  {
+    if ((line_aux = strstr(iniLine, "PORT")) != NULL)
+      if (strcmp(s_info->port, iniLine + 7) != 0)
+        change_port(s_info, cli_list, listenfd, line_aux);
+
+    if ((line_aux = strstr(iniLine, "PATH")) != NULL)
+      if (strcmp(s_info->dir_path, iniLine + 7) != 0)
+        change_path(s_info, line_aux);
+
+    if ((line_aux = strstr(iniLine, "RATE")) != NULL)
+      if (s_info->client_rate == atof(iniLine + 7))
+        change_rate(s_info, line_aux, cli);
+
+  }
+  fclose(iniFile);
+
+}
+
+
 /*!
  * \brief Faz um parse os parametros do terminal para encontrar a porta e o
  * diretorio onde o servidor sera montado e escreve em uma estrutura
@@ -314,7 +394,7 @@ int set_nonblock(int sockfd)
  * return -1 se der algum erro
  */
 
-int check_connection(client_list *cli_list, int listenfd, server_info *s_info)
+int check_connection(client_list *cli_list, server_info *s_info)
 {
   int connfd, cli_num;
   socklen_t clilen;
@@ -323,8 +403,8 @@ int check_connection(client_list *cli_list, int listenfd, server_info *s_info)
   cli_num = cli_list->list_len + 2;
 
   clilen = sizeof(cli_addr);
-  if((connfd = accept(listenfd, (struct sockaddr *)&cli_addr,
-                        &clilen)) == -1)
+  if((connfd = accept(cli_list->client[SERVER_INDEX].fd,
+                     (struct sockaddr *)&cli_addr, &clilen)) == -1)
     return -1;
 
   cli_list->client[cli_num].fd = connfd;
@@ -505,7 +585,7 @@ static int check_header_end(client_info *cli_info)
 static int parse_http_request(client_info *cli_info, const char *dir_path)
 {
   char path[PATH_MAX], method[MAX_METHOD_LEN];
-  char *content;
+  char *content = NULL;
   strcpy(path, dir_path);
   strcat(path, "/");
 
@@ -514,7 +594,7 @@ static int parse_http_request(client_info *cli_info, const char *dir_path)
     return -1;
 
   content = strstr(cli_info->buffer, "Content-Length");
-  if (content != NULL);
+  if (content != NULL)
     if (sscanf(content, "Content-Length: %ld", &cli_info->content_length) != 1)
       return -1;
 
@@ -847,7 +927,8 @@ int process_bucket_and_data(client_info *cli_info, thread_pool *t_pool,
     if (read_ret == 1 || write_ret == 1)
       bucket_consume(&cli_info->bucket);
 
-    if (feof(cli_info->fp) || ftell(cli_info->fp) == cli_info->content_length)
+    if (((ftell(cli_info->fp) == cli_info->content_length)
+        && cli_info->method == PUT) || feof(cli_info->fp))
       return -1;
   }
 

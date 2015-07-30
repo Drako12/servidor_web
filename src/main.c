@@ -2,12 +2,14 @@
 #include "bucket.h"
 #include "thread.h"
 
-int finished = 0;
+volatile int finished, settings = 0;
 
 void signal_callback_handler(int signum)
 {
   if (signum == SIGINT)
     finished = 1;
+  if (signum == SIGHUP)
+    settings = 1;
 }
 
 int main(int argc, char *argv[])
@@ -23,6 +25,7 @@ int main(int argc, char *argv[])
   memset(&s_info, 0, sizeof(s_info));
   memset(&action, 0, sizeof(action));
   memset(&poll_wait, 0, sizeof(poll_wait));
+  memset(&pool, 0, sizeof(pool));
 
   sigemptyset(&sigmask);
   sigaddset(&sigmask, SIGINT);
@@ -32,6 +35,9 @@ int main(int argc, char *argv[])
   sigaction(SIGINT, &action, 0);
   sigprocmask(SIG_BLOCK, &sigmask, NULL);
   sigemptyset(&sigmask);
+
+  if (save_pid_file() == -1)
+    return -1;
 
   if (parse_and_fill_server_info(argc, argv[1], argv[2], argv[3],
                                  &s_info) == -1)
@@ -51,6 +57,7 @@ int main(int argc, char *argv[])
     int cli_num, ret;
     const struct timespec *time_p = NULL;
 
+
     if (cli_list.list_len > 0)
       time_p = &poll_wait;
 
@@ -58,8 +65,11 @@ int main(int argc, char *argv[])
                       &sigmask)) < 0)
       continue;
 
+    if (settings)
+      change_settings(&cli_list, listenfd, &settings, &s_info);
+
     if (cli_list.client[SERVER_INDEX].revents & POLLIN)
-      if (check_connection(&cli_list, listenfd, &s_info) == -1 || --ret <= 0)
+      if (check_connection(&cli_list, &s_info) == -1 || --ret <= 0)
         continue;
 
     if (cli_list.client[LOCAL_SOCKET].revents & POLLIN)
@@ -80,7 +90,7 @@ int main(int argc, char *argv[])
       set_clients(cli_info, &cli_list, cli_num);
       poll_wait = find_poll_wait_time(cli_info, poll_wait);
 
-      if (cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM | POLLOUT)
+      if ((cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM | POLLOUT))
           && cli_info->method == 0)
       {
         if ((ret = process_http_request(cli_info, s_info.dir_path, &pool,

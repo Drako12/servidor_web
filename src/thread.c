@@ -19,15 +19,15 @@ return 0;
 void *handle_thread(void *pool)
 {
   int sockfd;
-  struct sockaddr_un client_addr;
+  struct sockaddr_un main_addr;
   thread_pool *t_pool = (thread_pool *)pool;
   jobs *job;
 
-  memset(&client_addr, 0, sizeof(client_addr));
-  client_addr.sun_family = AF_UNIX;
-  strcpy(client_addr.sun_path, "/tmp/SERVER_SOCKET");
+  memset(&main_addr, 0, sizeof(main_addr));
+  main_addr.sun_family = AF_UNIX;
+  strcpy(main_addr.sun_path, "/tmp/SERVER_SOCKET");
   sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
-  connect(sockfd, (struct sockaddr *)&client_addr, sizeof(client_addr));
+  connect(sockfd, (struct sockaddr *)&main_addr, sizeof(main_addr));
 
   while (1)
   {

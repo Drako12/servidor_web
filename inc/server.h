@@ -26,6 +26,7 @@
 #include <sys/time.h>
 #include <sys/un.h>
 
+#define MAX_INI_LINE 80
 #define BUFSIZE BUFSIZ
 #define HEADERSIZE 512
 #define NCLIENTS 128
@@ -57,7 +58,7 @@ typedef enum http_code_
 
 typedef enum methods_
 {
-  GET,
+  GET = 1,
   PUT
 }methods;
 
@@ -66,7 +67,7 @@ typedef struct server_info_
 {
   char dir_path[PATH_MAX];
   char port[MAX_PORT_LEN];
-  int client_rate;
+  double client_rate;
   int max_clients;
 } server_info;
 
@@ -100,14 +101,18 @@ typedef struct client_list_
 } client_list;
 
 
+int save_pid_file();
+void change_settings(client_list *cli_list, int listenfd,
+                     volatile int *settings, server_info *s_info);
 int parse_and_fill_server_info(int n_params, char *dir_path, char *port,
                                char *rate, server_info *s_info);
 int server_start_listen(const server_info *s_info);
-void client_list_init(client_list *cli_list, int listenfd, int max_clients, int sockfd);
+void client_list_init(client_list *cli_list, int listenfd, int max_clients,
+                      int sockfd);
 void get_thread_msg(client_list *cli_list);
 void close_connection(client_info *cli_info, client_list *cli_list,
                       int cli_num);
-int check_connection(client_list *cli_list, int listenfd, server_info *s_info);
+int check_connection(client_list *cli_list, server_info *s_info);
 int process_http_request(client_info *cli_info, const char *dir_path,
                          thread_pool *t_pool, client_list *cli_list,
                          int cli_num);
