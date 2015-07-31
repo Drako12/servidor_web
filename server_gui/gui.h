@@ -18,6 +18,7 @@ class ServerControl : public QDialog
     void apply(const QString &str);
   private slots:
     void applyClick();
+    void clearClick();
     void enableApplyButton(const QString &text);
   private:
     QLabel *port_label;

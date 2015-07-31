@@ -38,9 +38,9 @@ static void change_rate(server_info *s_info, char *iniLine, client_info *cli)
   rate = atof(iniLine + 7);
   s_info->client_rate = rate;
 
-  while (cli->next)
+  while (cli)
   {
-    cli->bucket.rate = rate;
+    cli->bucket.rate = rate;    
     if (s_info->client_rate < BUFSIZE)
       cli->bucket.to_be_consumed_tokens = cli->bucket.rate;
     cli = cli->next;
@@ -62,6 +62,11 @@ void change_settings(client_list *cli_list, int listenfd,
 
   while (fgets(iniLine, sizeof(iniLine), iniFile))
   {
+    iniLine[strlen(iniLine) - 1] = '\0';
+    
+    if (strncmp(iniLine + 7, "", 1) == 0)
+      continue;
+
     if ((line_aux = strstr(iniLine, "PORT")) != NULL)
       if (strcmp(s_info->port, iniLine + 7) != 0)
         change_port(s_info, cli_list, listenfd, line_aux);
@@ -71,7 +76,7 @@ void change_settings(client_list *cli_list, int listenfd,
         change_path(s_info, line_aux);
 
     if ((line_aux = strstr(iniLine, "RATE")) != NULL)
-      if (s_info->client_rate == atof(iniLine + 7))
+      if (s_info->client_rate != strtod(iniLine + 7, NULL))
         change_rate(s_info, line_aux, cli);
 
   }
@@ -780,11 +785,12 @@ int build_and_send_header(client_info *cli_info, client_list *cli_list,
   {
     build_header(cli_info, check_request(cli_info, dir_path, cli_list));
     header_size = strlen(cli_info->header);
-    if (cli_info->request_status > ACCEPTED)
-      return -1;
   }
-
+  
   ret = send_to_client(cli_info, cli_info->header, header_size);
+  
+  if (cli_info->request_status > ACCEPTED)
+    return -1;
 
   if (ret > 0)
   {

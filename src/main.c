@@ -29,10 +29,12 @@ int main(int argc, char *argv[])
 
   sigemptyset(&sigmask);
   sigaddset(&sigmask, SIGINT);
+  sigaddset(&sigmask, SIGHUP);
   action.sa_handler = signal_callback_handler;
   sigemptyset(&action.sa_mask);
   action.sa_flags = 0;
   sigaction(SIGINT, &action, 0);
+  sigaction(SIGHUP, &action, 0);
   sigprocmask(SIG_BLOCK, &sigmask, NULL);
   sigemptyset(&sigmask);
 
@@ -100,7 +102,11 @@ int main(int argc, char *argv[])
             close_connection(cli_info, &cli_list, cli_num);
           break;
         }
-        build_and_send_header(cli_info, &cli_list, s_info.dir_path);
+        if (build_and_send_header(cli_info, &cli_list, s_info.dir_path) == -1)
+        {
+          close_connection(cli_info, &cli_list, cli_num);
+          break;
+        }
       }
       else if ((cli_list.client[cli_num].revents & (POLLOUT | POLLIN)) &&
                cli_info->header_sent)

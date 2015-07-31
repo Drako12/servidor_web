@@ -1,6 +1,7 @@
 #include <QtGui>
 #include <QFile>
 #include <QTextStream>
+#include <signal.h>
 #include "gui.h"
 
 
@@ -30,6 +31,7 @@ ServerControl::ServerControl(QWidget *parent)
   connect(ratelineEdit, SIGNAL(textChanged(const QString &)), this,
           SLOT(enableApplyButton(const QString &)));
   connect(applyButton, SIGNAL(clicked()), this, SLOT(applyClick()));
+  connect(clearButton, SIGNAL(clicked()), this, SLOT(clearClick()));
   connect(closeButton, SIGNAL(clicked()), this, SLOT(close()));
 
   QHBoxLayout *portLayout = new QHBoxLayout;
@@ -73,10 +75,10 @@ void ServerControl::applyClick()
 
   QString filename = "server.ini";
   QFile file(filename);
-  if (file.open(QIODevice::ReadWrite))
+  if (file.open(QIODevice::ReadWrite | QIODevice::Truncate))
   {
     QTextStream stream(&file);
-    stream << "[SERVER_SETTINGS]" <<endl;
+   // stream << "[SERVER_SETTINGS]" <<endl;
     stream << "PORT = " << porttext << endl;
     stream << "PATH = " << pathtext << endl;
     stream << "RATE = " << ratetext <<  endl;
@@ -84,12 +86,25 @@ void ServerControl::applyClick()
 
   file.close();
 
-  fp = fopen("server.pid", "r");
+  if ((fp = fopen("server.pid", "r")) == NULL)
+    QMessageBox::information(this, "Error", "Server pid file cant be found\n"
+    "Maybe server has not been started?");
+  else
+  {
   kill(atoi(fgets(pid, 100, fp)), SIGHUP);
   fclose(fp);
+  }
 }
 
 void ServerControl::enableApplyButton(const QString &text)
 {
   applyButton->setEnabled(!text.isEmpty());
 }
+
+void ServerControl::clearClick()
+{
+  portlineEdit->clear();
+  pathlineEdit->clear();
+  ratelineEdit->clear();
+}
+
