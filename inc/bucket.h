@@ -11,16 +11,16 @@
 
 typedef struct token_bucket
 {
-  double capacity;
-  double tokens;
-  double to_be_consumed_tokens;
-  double rate;
-  long timestamp;
+  long long capacity;
+  long long tokens;
+  long long to_be_consumed_tokens;
+  long long rate;
+  long long timestamp;
 
 } t_bucket;
 
-void bucket_init(t_bucket *bucket, double tokens, double capacity,
-                 double rate);
+void bucket_init(t_bucket *bucket, long long tokens,  long long capacity,
+                  long long rate);
 bool bucket_consume(t_bucket *bucket);
 bool bucket_check(t_bucket *bucket);
 struct timespec bucket_wait(t_bucket *bucket);

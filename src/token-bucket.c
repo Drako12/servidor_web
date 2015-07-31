@@ -6,11 +6,11 @@
  * \return tempo em milisegundos
  */
 
-static long time_now()
+static long long time_now()
 {
   struct timespec time;
   clock_gettime(CLOCK_REALTIME, &time);
-  return (long)(time.tv_sec * 1000 + time.tv_nsec/1000000);
+  return (long long)(time.tv_sec * 1000 + time.tv_nsec/1000000);
 }
 
 /*!
@@ -22,14 +22,14 @@ static long time_now()
 
 static void refill_tokens(t_bucket *bucket)
 {
-  long now, delta;
+  long long now, delta;
 
   now = time_now();
   delta = (now - bucket->timestamp);
 
   if (bucket->tokens < bucket->capacity)
   {
-    double new_tokens;
+    long long new_tokens;
 
     new_tokens = delta * bucket->rate * 0.001;
 
@@ -51,7 +51,7 @@ static void refill_tokens(t_bucket *bucket)
  *
  */
 
-void bucket_init(t_bucket *bucket, double tokens, double capacity, double rate)
+void bucket_init(t_bucket *bucket, long long tokens, long long capacity, long long rate)
 {
   bucket->capacity = capacity;
   bucket->tokens = tokens;
@@ -110,7 +110,7 @@ bool bucket_check(t_bucket *bucket)
 
 struct timespec bucket_wait(t_bucket *bucket)
 {
-  double tokens_needed;
+  long long tokens_needed;
   struct timespec t_wait;
   memset(&t_wait, 0, sizeof(t_wait));
   refill_tokens(bucket);
@@ -119,8 +119,8 @@ struct timespec bucket_wait(t_bucket *bucket)
     return t_wait;
 
   tokens_needed = bucket->to_be_consumed_tokens - bucket->tokens;
-  t_wait.tv_nsec = 1000 * tokens_needed / (bucket->rate/100000);
-  t_wait.tv_sec = (int)(tokens_needed / bucket->rate);
+  t_wait.tv_nsec = (long)(100000000 * tokens_needed / (bucket->rate));
+  t_wait.tv_sec = (long)(tokens_needed / bucket->rate);
   return t_wait;
 }
 

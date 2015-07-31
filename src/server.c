@@ -16,14 +16,26 @@ int save_pid_file()
 return 0;
 }
 
+static void set_to_be_consumed_tokens(client_info *cli_info)
+{
+  if (cli_info->bucket.rate > BUFSIZE)
+    cli_info->bucket.to_be_consumed_tokens = BUFSIZE - 1;
+  else
+    cli_info->bucket.to_be_consumed_tokens = cli_info->bucket.rate;
+}
+
 static void change_port(server_info *s_info, client_list *cli_list,
                         int listenfd, char *iniLine)
 {
   strcpy(s_info->port, iniLine + 7);
-  listenfd = server_start_listen(s_info);
+  if((listenfd = server_start_listen(s_info)) == -1)
+    fprintf(stderr, "Error changing ports");
+  else
+  {
+  close(cli_list->client[SERVER_INDEX].fd);
   cli_list->client[SERVER_INDEX].fd = listenfd;
   cli_list->client[SERVER_INDEX].events = POLLIN;
-
+  }
 }
 
 static void change_path(server_info *s_info, char *iniLine)
@@ -33,28 +45,25 @@ static void change_path(server_info *s_info, char *iniLine)
 
 static void change_rate(server_info *s_info, char *iniLine, client_info *cli)
 {
-  double rate;
+  long long rate;
 
-  rate = atof(iniLine + 7);
+  rate = atoll(iniLine + 7);
   s_info->client_rate = rate;
 
   while (cli)
   {
-    cli->bucket.rate = rate;    
-    if (s_info->client_rate < BUFSIZE)
-      cli->bucket.to_be_consumed_tokens = cli->bucket.rate;
+    cli->bucket.rate = rate;
+    set_to_be_consumed_tokens(cli);
     cli = cli->next;
   }
 }
 
-void change_settings(client_list *cli_list, int listenfd,
-                     volatile int *settings, server_info *s_info)
+void change_settings(client_list *cli_list, int listenfd, server_info *s_info)
 {
   char iniLine[MAX_INI_LINE];
   char *line_aux;
   FILE *iniFile;
   client_info *cli = cli_list->head;
-  settings = 0;
 
   if ((iniFile = fopen("server.ini", "r")) == NULL)
     fprintf(stderr, "Ini file not found");
@@ -63,7 +72,7 @@ void change_settings(client_list *cli_list, int listenfd,
   while (fgets(iniLine, sizeof(iniLine), iniFile))
   {
     iniLine[strlen(iniLine) - 1] = '\0';
-    
+
     if (strncmp(iniLine + 7, "", 1) == 0)
       continue;
 
@@ -76,7 +85,7 @@ void change_settings(client_list *cli_list, int listenfd,
         change_path(s_info, line_aux);
 
     if ((line_aux = strstr(iniLine, "RATE")) != NULL)
-      if (s_info->client_rate != strtod(iniLine + 7, NULL))
+      if (s_info->client_rate != atoll(iniLine + 7))
         change_rate(s_info, line_aux, cli);
 
   }
@@ -311,10 +320,7 @@ static int set_client_struct(client_info *cli_info, client_list *cli_list,
   cli_info->thread_finished = true;
   cli_info->sockfd = cli_list->client[cli_num].fd;
 
-  if (cli_info->bucket.rate > BUFSIZE)
-    cli_info->bucket.to_be_consumed_tokens = BUFSIZE - 1;
-  else
-    cli_info->bucket.to_be_consumed_tokens = cli_info->bucket.rate;
+  set_to_be_consumed_tokens(cli_info);
 
   cli_info->bytes_write = cli_info->bucket.to_be_consumed_tokens;
   return 0;
@@ -520,7 +526,7 @@ static int check_request(client_info *cli_info, const char *dir_path,
     while (i->next)
     {
       if (i->method == PUT && i != cli_info)
-        if (i->file_path == cli_info->file_path)
+        if (strcmp(i->file_path, cli_info->file_path) == 0)
           return cli_info->request_status = FORBIDDEN;
       i = i->next;
     }
@@ -540,8 +546,8 @@ static int check_request(client_info *cli_info, const char *dir_path,
 
     while (i->next)
     {
-      if (i->method == PUT && i != cli_info)
-        if (i->file_path == cli_info->file_path)
+      if (i != cli_info)
+        if (strcmp(i->file_path, cli_info->file_path) == 0)
           return cli_info->request_status = FORBIDDEN;
       i = i->next;
     }
@@ -600,7 +606,8 @@ static int parse_http_request(client_info *cli_info, const char *dir_path)
 
   content = strstr(cli_info->buffer, "Content-Length");
   if (content != NULL)
-    if (sscanf(content, "Content-Length: %ld", &cli_info->content_length) != 1)
+    if (sscanf(content, "Content-Length: %ld", &cli_info->content_length)
+               != 1)
       return -1;
 
   realpath(path, cli_info->file_path);
@@ -647,8 +654,13 @@ static int read_data(client_info *cli_info, thread_pool *t_pool,
 {
   if (!cli_info->header_sent)
   {
+    if (cli_info->bucket.to_be_consumed_tokens < HEADERSIZE)
+      cli_info->bucket.to_be_consumed_tokens = BUFSIZE;
+
     if (get_client_data(cli_info) == -1)
       return -1;
+
+    set_to_be_consumed_tokens(cli_info);
     cli_info->header_size = check_header_end(cli_info);
     return cli_info->header_size;
   }
@@ -786,9 +798,9 @@ int build_and_send_header(client_info *cli_info, client_list *cli_list,
     build_header(cli_info, check_request(cli_info, dir_path, cli_list));
     header_size = strlen(cli_info->header);
   }
-  
+
   ret = send_to_client(cli_info, cli_info->header, header_size);
-  
+
   if (cli_info->request_status > ACCEPTED)
     return -1;
 

@@ -68,8 +68,11 @@ int main(int argc, char *argv[])
       continue;
 
     if (settings)
-      change_settings(&cli_list, listenfd, &settings, &s_info);
-
+    {
+      change_settings(&cli_list, listenfd, &s_info);
+      settings = 0;
+      memset(&poll_wait, 0, sizeof(poll_wait));
+    }
     if (cli_list.client[SERVER_INDEX].revents & POLLIN)
       if (check_connection(&cli_list, &s_info) == -1 || --ret <= 0)
         continue;

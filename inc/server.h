@@ -67,7 +67,7 @@ typedef struct server_info_
 {
   char dir_path[PATH_MAX];
   char port[MAX_PORT_LEN];
-  double client_rate;
+  long long client_rate;
   int max_clients;
 } server_info;
 
@@ -102,8 +102,7 @@ typedef struct client_list_
 
 
 int save_pid_file();
-void change_settings(client_list *cli_list, int listenfd,
-                     volatile int *settings, server_info *s_info);
+void change_settings(client_list *cli_list, int listenfd, server_info *s_info);
 int parse_and_fill_server_info(int n_params, char *dir_path, char *port,
                                char *rate, server_info *s_info);
 int server_start_listen(const server_info *s_info);
