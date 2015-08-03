@@ -39,7 +39,10 @@ int main(int argc, char *argv[])
   sigemptyset(&sigmask);
 
   if (save_pid_file() == -1)
-    return -1;
+  {
+    fprintf(stderr, "Error opening server pid file, GUI will not work");
+      return -1;
+  }
 
   if (parse_and_fill_server_info(argc, argv[1], argv[2], argv[3],
                                  &s_info) == -1)
@@ -63,16 +66,17 @@ int main(int argc, char *argv[])
     if (cli_list.list_len > 0)
       time_p = &poll_wait;
 
-    if ((ret = ppoll(cli_list.client, cli_list.list_len + 2, time_p,
-                      &sigmask)) < 0)
-      continue;
-
     if (settings)
     {
       change_settings(&cli_list, &s_info);
       settings = 0;
       memset(&poll_wait, 0, sizeof(poll_wait));
     }
+
+    if ((ret = ppoll(cli_list.client, cli_list.list_len + 2, time_p,
+                      &sigmask)) < 0)
+      continue;
+
     if (cli_list.client[SERVER_INDEX].revents & POLLIN)
       if (check_connection(&cli_list, &s_info) == -1 || --ret <= 0)
         continue;
@@ -95,39 +99,36 @@ int main(int argc, char *argv[])
       set_clients(cli_info, &cli_list, cli_num);
       poll_wait = find_poll_wait_time(cli_info, poll_wait);
 
-      if ((cli_list.client[cli_num].revents & (POLLIN | POLLRDNORM | POLLOUT))
+      if ((cli_list.client[cli_num].revents & (POLLIN | POLLOUT))
           && cli_info->method == 0)
       {
         if ((ret = process_http_request(cli_info, s_info.dir_path, &pool,
                                         &cli_list, cli_num) < 0))
         {
           if (ret == -1)
-            close_connection(cli_info, &cli_list, cli_num);
+            goto close;
           break;
         }
         if (build_and_send_header(cli_info, &cli_list, s_info.dir_path) == -1)
-        {
-          close_connection(cli_info, &cli_list, cli_num);
-          break;
-        }
+          goto close;
       }
       else if ((cli_list.client[cli_num].revents & (POLLOUT | POLLIN)) &&
                cli_info->header_sent)
-        if (process_bucket_and_data(cli_info, &pool, &cli_list, cli_num) == -1)
-        {
-          close_connection(cli_info, &cli_list, cli_num);
-          break;
-        }
+        if (process_bucket_and_data(cli_info, &pool, &cli_list, cli_num) == -1
+            && cli_info->thread_finished)
+          goto close;
 
       if (cli_list.client[cli_num].revents & (POLLERR | POLLHUP | POLLNVAL))
-      {
-        close_connection(cli_info, &cli_list, cli_num);
-        break;
-      }
+        goto close;
 
       cli_info = cli_info->next;
       cli_num++;
     }
+    continue;
+
+close:
+  close_connection(cli_info, &cli_list, cli_num);
+
   }
 
   cleanup(&cli_list, &pool);

@@ -1,21 +1,43 @@
 #include "thread.h"
 
+/*!
+ * \brief Cria a pool de threads e inicia as variaveis mutex e cond
+ *
+ * param[out] t_pool pool de threads
+ *
+ * return 0 para tudo ok
+ * return -1 caso de algum erro
+ *
+ */
+
 int create_pool_and_queue_init(thread_pool *t_pool)
 {
   int i;
 
   t_pool->queue.size = 0;
+  t_pool->finished = false;
 
-  pthread_mutex_init(&(t_pool->lock), NULL);
-  pthread_cond_init(&(t_pool->notify), NULL);
+  if (pthread_mutex_init(&(t_pool->lock), NULL) != 0)
+    return -1;
+  if (pthread_cond_init(&(t_pool->notify), NULL) != 0)
+    return -1;
 
   for (i = 0; i < NTHREADS; i++)
-    pthread_create(&(t_pool->threads[i]), NULL, handle_thread, t_pool);
-
+    if (pthread_create(&(t_pool->threads[i]), NULL, handle_thread, t_pool)
+        != 0)
+      return -1;
 
 return 0;
 }
 
+/*!
+ * \brief Funcao executada pela thread na criacao, ela executa os jobs e
+ * escreve no socket local ao finalizar
+ *
+ * param[in] pool Pool de threads
+ *
+ *
+ */
 void *handle_thread(void *pool)
 {
   int sockfd;
@@ -29,7 +51,7 @@ void *handle_thread(void *pool)
   sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
   connect(sockfd, (struct sockaddr *)&main_addr, sizeof(main_addr));
 
-  while (1)
+  while (!t_pool->finished)
   {
     pthread_mutex_lock(&(t_pool->lock));
 
@@ -51,8 +73,20 @@ void *handle_thread(void *pool)
       free(job);
     }
   }
+  return NULL; //pthread_exit
 }
 
+
+/*!
+ * \brief Adiciona um job ao queue de jobs
+ *
+ * param[out] function variavel que contem a funcao a ser adicionada ao job
+ * param[in] t_pool Pool de threads
+ *
+ * return 0 para tudo ok
+ * return -1 para erro
+ *
+ */
 
 int add_job(thread_pool *t_pool, void (*function)(void *), void *arg)
 {
@@ -60,10 +94,9 @@ int add_job(thread_pool *t_pool, void (*function)(void *), void *arg)
   job = calloc(1, sizeof(*job));
 
   pthread_mutex_lock(&(t_pool->lock));
+
   if (t_pool->queue.head == NULL)
-  {
     t_pool->queue.head = job;
-  }
   else
   {
     jobs *i = t_pool->queue.head;
@@ -84,6 +117,15 @@ int add_job(thread_pool *t_pool, void (*function)(void *), void *arg)
 
   return 0;
 }
+
+/*!
+ * \brief Retorna um job da queue e diminui o tamanho dela em 1
+ *
+ * param[in] t_pool Pool de threads
+ *
+ * return job
+ *
+ */
 
 jobs *get_job(thread_pool *t_pool)
 {

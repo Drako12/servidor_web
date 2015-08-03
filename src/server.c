@@ -2,17 +2,17 @@
 
 /*!
  * \brief Cria um arquivo com o pid do processo
+ *
+ * return 0 se for tudo ok
+ * return -1 se der algum erro
  */
 
 int save_pid_file()
 {
   FILE *fp;
 
-  if((fp = fopen("server.pid", "w+")) == NULL)
-  {
-    fprintf(stderr, "Error opening file");
+  if ((fp = fopen("server.pid", "w+")) == NULL)
     return -1;
-  }
 
   fprintf(fp, "%d", getpid());
   fclose(fp);
@@ -37,7 +37,7 @@ static void set_to_be_consumed_tokens(client_info *cli_info)
 }
 
 /*!
- * \brief Funcao para mudar o valor da porta em tempo de execucao 
+ * \brief Funcao para mudar o valor da porta em tempo de execucao
  *
  * \param[in] iniLine Variavel com o valor da nova porta
  * \param[out] cli_list Lista de clientes
@@ -55,14 +55,14 @@ static void change_port(server_info *s_info, client_list *cli_list,
     fprintf(stderr, "Error changing ports");
   else
   {
-  close(cli_list->client[SERVER_INDEX].fd);
-  cli_list->client[SERVER_INDEX].fd = listenfd;
-  cli_list->client[SERVER_INDEX].events = POLLIN;
+    close(cli_list->client[SERVER_INDEX].fd);
+    cli_list->client[SERVER_INDEX].fd = listenfd;
+    cli_list->client[SERVER_INDEX].events = POLLIN;
   }
 }
 
 /*!
- * \brief Funcao para mudar o path em tempo de execucao 
+ * \brief Funcao para mudar o path em tempo de execucao
  *
  * \param[in] iniLine Variavel com o valor do novo path
  * \param[out] s_info Estrutura as informacoes do servidor
@@ -76,7 +76,7 @@ static void change_path(server_info *s_info, char *iniLine)
 
 /*!
  * \brief Funcao para mudar a velocidade de transmissao do servidor  em tempo
- * de execucao 
+ * de execucao
  *
  * \param[in] iniLine Variavel com o valor do novo rate
  * \param[out] s_info Estrutura as informacoes do servidor
@@ -104,7 +104,7 @@ static void change_rate(server_info *s_info, char *iniLine, client_info *cli)
  *
  * \param[in] s_info Estrutura as informacoes do servidor
  * \param[in] cli_list List de clientes
- * 
+ *
  */
 
 void change_settings(client_list *cli_list, server_info *s_info)
@@ -247,7 +247,7 @@ int server_start_listen(const server_info *s_info)
 }
 
 /*!
- * \brief Funcao iniciar o socket de comunicacao local 
+ * \brief Funcao iniciar o socket de comunicacao local
  *
  * return sockfd
  */
@@ -327,8 +327,9 @@ static void dec_max_clients(client_list *cli_list, server_info *s_info)
 }
 
 /*!
- * \brief Quando existem dados no socket local vindos de uma thread essa funcao
- * le esses dados e seta o cliente de volta para poder transmistir/receber dados
+ * \brief Quando existem dados no socket local vindos de uma thread essa
+ * funcao le esses dados e seta o cliente de volta para poder
+ * transmistir/receber dados
  * O cliente e identificado atravez do socket
  *
  * \param[out] cli_list lista de clientes
@@ -376,7 +377,7 @@ static void shift_client_list(client_list *cli_list, int cli_num)
 }
 
 /*!
- * \brief Funcao para inicializar a estrutura de clientes 
+ * \brief Funcao para inicializar a estrutura de clientes
  *
  * \param[in] cli_list Lista de clientes
  * \param[in] cli_num Numero do cliente
@@ -393,15 +394,15 @@ static int set_client_struct(client_info *cli_info, client_list *cli_list,
   cli_info->is_ready = true;
   cli_info->thread_finished = true;
   cli_info->sockfd = cli_list->client[cli_num].fd;
-
+  cli_info->timestamp = time_now();
   set_to_be_consumed_tokens(cli_info);
 
   cli_info->bytes_write = cli_info->bucket.to_be_consumed_tokens;
   return 0;
 }
 /*!
- * \brief Adiciona um node a lista de clientes, checa a quantidade de clientes
- * e chama uma funcao para desalocar ou alocar mais espaco.
+ * \brief Adiciona um node a lista de clientes, checa a quantidade de
+ * clientes e chama uma funcao para desalocar ou alocar mais espaco.
  * param[in] s_info Dados de configuracao do servidor
  * param[out] cli_list Lista de clientes
  *
@@ -703,9 +704,9 @@ static int parse_http_request(client_info *cli_info, const char *dir_path)
 }
 
 /*!
- * \brief Funcao para setar o cliente para um estado em que ele nao faca nada 
- * ate que a thread responsavel por executar a tarefa desse cliente sinalize que
- * terminou
+ * \brief Funcao para setar o cliente para um estado em que ele nao faca nada
+ * ate que a thread responsavel por executar a tarefa desse cliente sinalize
+ * que terminou
  *
  * \param[in] cli_num Numero do cliente
  * \param[out] cli_list Lista de clientes
@@ -720,10 +721,14 @@ static void end_job(client_list *cli_list, client_info *cli_info, int cli_num)
 }
 
 /*!
- * \brief Funcao para ler os dados de um socket 
+ * \brief Funcao para ler os dados de um socket, caso o cliente pare de enviar
+ * dados por mais de 30 segundos ele sera desconectado
  *
  * \param[in] cli_info node da lista de clientes
  *
+ * return 0 se for tudo ok
+ * return -1 caso precise desconectar o cliente
+ * return -2 caso o cliente esteja conectado mas o socket esteja vazio
  */
 
 static int get_client_data(client_info *cli_info)
@@ -733,16 +738,17 @@ static int get_client_data(client_info *cli_info)
   if ((nread = recv(cli_info->sockfd, cli_info->buffer,
                     cli_info->bucket.to_be_consumed_tokens, 0)) <= 0)
   {
-    if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
+    if ((errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR) &&
+         cli_info->timeout < 30000)
     {
-      cli_info->empty_socket_count++; //transformar isso em timeout (tempo)
+      cli_info->timeout += find_timeout(time_now(), cli_info);
       return -2;
     }
     else
       return -1;
   }
 
-  cli_info->empty_socket_count = 0;
+  cli_info->timeout = 0;
 
   cli_info->bytes_read = nread;
   cli_info->header_size = 0;
@@ -751,8 +757,8 @@ static int get_client_data(client_info *cli_info)
 }
 
 /*!
- * \brief Funcao que decide como os dados serao lidos de acordo com o metodo e 
- * envio ou o nao do header 
+ * \brief Funcao que decide como os dados serao lidos de acordo com o metodo
+ * e envio ou o nao do header
  *
  * \param[in] t_pool estrutura com o pool de threads
  * \param[in] cli_list Lista de clientes
@@ -796,7 +802,7 @@ static int read_data(client_info *cli_info, thread_pool *t_pool,
 }
 
 /*!
- * \brief Funcao para enviar dados para um cliente 
+ * \brief Funcao para enviar dados para um cliente
  *
  * \param[in] buffer Buffer com os dados a serem enviados
  * \param[in] cli_info node da lista de clientes
@@ -881,8 +887,8 @@ static char *status_msg(const http_code status)
 
 static void build_header(client_info *cli_info, int status)
 {
-  snprintf(cli_info->header, sizeof(cli_info->header), "HTTP/1.0 %d %s\r\n\r\n"
-  ,status, status_msg(status));
+  snprintf(cli_info->header, sizeof(cli_info->header),
+           "HTTP/1.0 %d %s\r\n\r\n" ,status, status_msg(status));
 }
 
 /*!
@@ -917,9 +923,10 @@ int process_http_request(client_info *cli_info, const char *dir_path,
 }
 
 /*!
- * \brief Essa funcao chama uma funcao para criar o header e a outra para enviar
+ * \brief Essa funcao chama uma funcao para criar o header e a outra para
+ * enviar
  * o arquivo que sera aberto para leitura/escrita tambem e aberto
- *  
+ *
  * \param[in] cli_list Lista de clientes
  * \param[in] cli_info node da lista de clientes
  * \param[in] dir_path path dos arquivos
@@ -994,9 +1001,6 @@ void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
     cli_list->client[cli_num].events = 0;
   else if (cli_info->header_sent && cli_info->thread_finished)
     cli_list->client[cli_num].events = POLLIN | POLLOUT;
-
-
-
 }
 
 /*!
@@ -1138,7 +1142,14 @@ struct timespec find_poll_wait_time(client_info *cli_info,
   return t_wait;
 }
 
+long long find_timeout(long long now, client_info *cli_info)
+{
+  long long time_passed;
 
+  time_passed = cli_info->timestamp;
+  cli_info->timestamp = time_now();
+  return now - time_passed;
+}
 /*!
  * \brief Faz o cleanup caso o programa se receba um sinal
  *
@@ -1149,13 +1160,26 @@ void cleanup(client_list *cli_list, thread_pool *t_pool)
 {
   int i;
   client_info *cli_info, *curr_cli;
+  jobs *job, *curr_job;
 
+  job = t_pool->queue.head;
+  pthread_mutex_lock(&(t_pool->lock));
+  t_pool->finished = true;
   pthread_cond_broadcast(&(t_pool->notify));
-  for (i = 0; i < NTHREADS; i++)  
+  pthread_mutex_unlock(&(t_pool->lock));
+
+  for (i = 0; i < NTHREADS; i++)
     pthread_join(t_pool->threads[i], NULL);
- 
+
   cli_info = cli_list->head;
-  
+
+  while (job)
+  {
+    curr_job = job;
+    job = job->next;
+    free(curr_job);
+  }
+
   while (cli_info)
   {
     curr_cli = cli_info;
@@ -1164,5 +1188,7 @@ void cleanup(client_list *cli_list, thread_pool *t_pool)
     free(curr_cli);
   }
   free(cli_list->client);
+  pthread_mutex_destroy(&(t_pool->lock));
+  pthread_cond_destroy(&(t_pool->notify));
 }
 

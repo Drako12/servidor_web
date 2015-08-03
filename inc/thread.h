@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <errno.h>
+#include <stdbool.h>
 
 #define NTHREADS 4
 
@@ -32,6 +33,7 @@ typedef struct thread_pool_
   pthread_cond_t notify;
   pthread_t threads[NTHREADS];
   job_queue queue;
+  bool finished;
 } thread_pool;
 
 

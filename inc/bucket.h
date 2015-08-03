@@ -26,5 +26,6 @@ bool bucket_check(t_bucket *bucket);
 struct timespec bucket_wait(t_bucket *bucket);
 int timespec_compare(struct timespec *t1, struct timespec *t2);
 int timespec_isset(struct timespec *t1);
+long long time_now();
 
 #endif

@@ -6,7 +6,7 @@
  * \return tempo em milisegundos
  */
 
-static long long time_now()
+long long time_now()
 {
   struct timespec time;
   clock_gettime(CLOCK_REALTIME, &time);

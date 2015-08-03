@@ -83,7 +83,8 @@ typedef struct client_info_
   int bytes_write;
   int sockfd;
   int header_size;
-  int empty_socket_count;
+  long long timeout;
+  long long timestamp;
   long content_length;
   bool header_sent;
   bool is_ready;
@@ -128,5 +129,6 @@ struct timespec find_poll_wait_time(client_info *cli_info,
 void cleanup(client_list *cli_list, thread_pool *t_pool);
 int server_socket_init();
 void read_filedata(void *cli_info);
+long long find_timeout(long long now, client_info *cli_info);
 
 #endif

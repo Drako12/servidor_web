@@ -78,26 +78,36 @@ void ServerControl::applyClick()
   QString ratetext = ratelineEdit->text();
 
   QDir dir(pathtext);
- 
+
+  //dir = dir.makeAbsolute();
+
   if (!dir.exists())
   {
     if (dir.mkpath(".") == false)
-      QMessageBox::information(this, "Error", "Folder cant be created\n");
+      QMessageBox::information(this, "Error", "Folder cant be created\n"
+                               "Changes will not be applied");
   }
   else
   {
     QFileInfo finfo(pathtext);
-    if (finfo.permission(QFile::WriteUser) == false)
-      QMessageBox::information(this, "Error", "Cant use this folder\n");
+
+    if (finfo.permission(QFile::WriteUser) == false &&
+          !pathtext.isEmpty())
+        QMessageBox::information(this, "Error", "Cant use this folder\n"
+                                 "Changes will not be applied");
     else
     {
       QString filename = "server.ini";
+      QString path;
       QFile file(filename);
+
+      path = dir.absolutePath();
+
       if (file.open(QIODevice::ReadWrite | QIODevice::Truncate))
       {
         QTextStream stream(&file);
         stream << "PORT = " << porttext << endl;
-        stream << "PATH = " << pathtext << endl;
+        stream << "PATH = " << path << endl;
         stream << "RATE = " << ratetext <<  endl;
       }
 
@@ -108,8 +118,8 @@ void ServerControl::applyClick()
         "Maybe server has not been started?");
       else
       {
-      kill(atoi(fgets(pid, 100, fp)), SIGHUP);
-      fclose(fp);
+        kill(atoi(fgets(pid, 100, fp)), SIGHUP);
+        fclose(fp);
       }
     }
   }
