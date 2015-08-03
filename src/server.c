@@ -1,5 +1,9 @@
 #include "server.h"
 
+/*!
+ * \brief Cria um arquivo com o pid do processo
+ */
+
 int save_pid_file()
 {
   FILE *fp;
@@ -16,6 +20,14 @@ int save_pid_file()
 return 0;
 }
 
+/*!
+ * \brief Seta o valor dos tokens a serem consumidos, essa variavel tambem
+ * e utilizada para as transmissoes com o cliente
+ *
+ * \param[out] cli_info Node do cliente
+ *
+ */
+
 static void set_to_be_consumed_tokens(client_info *cli_info)
 {
   if (cli_info->bucket.rate > BUFSIZE)
@@ -24,10 +36,21 @@ static void set_to_be_consumed_tokens(client_info *cli_info)
     cli_info->bucket.to_be_consumed_tokens = cli_info->bucket.rate;
 }
 
+/*!
+ * \brief Funcao para mudar o valor da porta em tempo de execucao 
+ *
+ * \param[in] iniLine Variavel com o valor da nova porta
+ * \param[out] cli_list Lista de clientes
+ * \param[out] s_info Estrutura as informacoes do servidor
+ *
+ */
+
 static void change_port(server_info *s_info, client_list *cli_list,
-                        int listenfd, char *iniLine)
+                        char *iniLine)
 {
-  strcpy(s_info->port, iniLine + 7);
+  int listenfd;
+
+  strcpy(s_info->port, iniLine + INI_OFFSET);
   if((listenfd = server_start_listen(s_info)) == -1)
     fprintf(stderr, "Error changing ports");
   else
@@ -38,16 +61,34 @@ static void change_port(server_info *s_info, client_list *cli_list,
   }
 }
 
+/*!
+ * \brief Funcao para mudar o path em tempo de execucao 
+ *
+ * \param[in] iniLine Variavel com o valor do novo path
+ * \param[out] s_info Estrutura as informacoes do servidor
+ *
+ */
+
 static void change_path(server_info *s_info, char *iniLine)
 {
-  strcpy(s_info->dir_path, iniLine + 7);
+  strcpy(s_info->dir_path, iniLine + INI_OFFSET);
 }
+
+/*!
+ * \brief Funcao para mudar a velocidade de transmissao do servidor  em tempo
+ * de execucao 
+ *
+ * \param[in] iniLine Variavel com o valor do novo rate
+ * \param[out] s_info Estrutura as informacoes do servidor
+ * \param[out] cli_info primeiro node da lista de clientes
+ *
+ */
 
 static void change_rate(server_info *s_info, char *iniLine, client_info *cli)
 {
   long long rate;
 
-  rate = atoll(iniLine + 7);
+  rate = atoll(iniLine + INI_OFFSET);
   s_info->client_rate = rate;
 
   while (cli)
@@ -58,7 +99,15 @@ static void change_rate(server_info *s_info, char *iniLine, client_info *cli)
   }
 }
 
-void change_settings(client_list *cli_list, int listenfd, server_info *s_info)
+/*!
+ * \brief Funcao para mudar as configuracoes do servidor em tempo de execucao
+ *
+ * \param[in] s_info Estrutura as informacoes do servidor
+ * \param[in] cli_list List de clientes
+ * 
+ */
+
+void change_settings(client_list *cli_list, server_info *s_info)
 {
   char iniLine[MAX_INI_LINE];
   char *line_aux;
@@ -73,19 +122,19 @@ void change_settings(client_list *cli_list, int listenfd, server_info *s_info)
   {
     iniLine[strlen(iniLine) - 1] = '\0';
 
-    if (strncmp(iniLine + 7, "", 1) == 0)
+    if (strncmp(iniLine + INI_OFFSET, "", 1) == 0)
       continue;
 
     if ((line_aux = strstr(iniLine, "PORT")) != NULL)
-      if (strcmp(s_info->port, iniLine + 7) != 0)
-        change_port(s_info, cli_list, listenfd, line_aux);
+      if (strcmp(s_info->port, iniLine + INI_OFFSET) != 0)
+        change_port(s_info, cli_list, line_aux);
 
     if ((line_aux = strstr(iniLine, "PATH")) != NULL)
-      if (strcmp(s_info->dir_path, iniLine + 7) != 0)
+      if (strcmp(s_info->dir_path, iniLine + INI_OFFSET) != 0)
         change_path(s_info, line_aux);
 
     if ((line_aux = strstr(iniLine, "RATE")) != NULL)
-      if (s_info->client_rate != atoll(iniLine + 7))
+      if (s_info->client_rate != atoll(iniLine + INI_OFFSET))
         change_rate(s_info, line_aux, cli);
 
   }
@@ -197,6 +246,12 @@ int server_start_listen(const server_info *s_info)
   return listenfd;
 }
 
+/*!
+ * \brief Funcao iniciar o socket de comunicacao local 
+ *
+ * return sockfd
+ */
+
 int server_socket_init()
 {
   int sockfd;
@@ -216,6 +271,8 @@ int server_socket_init()
  * servidor
  *
  * \param[in] listenfd Socket de escuta do servidor
+ * \param[in] max_clients Numero maximo de clientes ativos no servidor
+ * \param[in] sockfd Socket de comunicao local
  * \param[out] cli_list Estrutura de clientes, sendo que a posicao
  * SERVER_INDEX
  * no client armazena o socket de escuta do servidor
@@ -269,6 +326,14 @@ static void dec_max_clients(client_list *cli_list, server_info *s_info)
                              s_info->max_clients * sizeof(*cli_list->client));
 }
 
+/*!
+ * \brief Quando existem dados no socket local vindos de uma thread essa funcao
+ * le esses dados e seta o cliente de volta para poder transmistir/receber dados
+ * O cliente e identificado atravez do socket
+ *
+ * \param[out] cli_list lista de clientes
+ *
+ */
 void get_thread_msg(client_list *cli_list)
 {
   int num_bytes, sockfd, i;
@@ -309,6 +374,15 @@ static void shift_client_list(client_list *cli_list, int cli_num)
   memmove(&cli_list->client[cli_num], &cli_list->client[cli_num + 1],
          (cli_list->list_len - cli_num + 1) * sizeof(*cli_list->client));
 }
+
+/*!
+ * \brief Funcao para inicializar a estrutura de clientes 
+ *
+ * \param[in] cli_list Lista de clientes
+ * \param[in] cli_num Numero do cliente
+ * \param[out] cli_info node da lista de clientes
+ *
+ */
 
 static int set_client_struct(client_info *cli_info, client_list *cli_list,
                              int cli_num)
@@ -505,9 +579,9 @@ void close_connection(client_info *cli_info, client_list *cli_list,
 /*!
  * \brief Checa o request e retorna o valor do status HTTP
  *
- * param[in] path Path vindo do client
- * param[in] realpath Path resolvido pelo realpath
- * param[in] path do servidor
+ * param[out] cli_info node da lista de clientes
+ * param[in] cli_list lista de clientes
+ * param[in] dir_path path do servidor
  *
  * return status HTTP
  * return -1 se der algum erro
@@ -563,6 +637,15 @@ static int check_request(client_info *cli_info, const char *dir_path,
   return -1;
 }
 
+/*!
+ * \brief Checa pelo final do header
+ *
+ * \param[in] cli_info node da lista de clientes
+ *
+ * return num_bytes_header tamanho do header
+ * return -1 se nao encontrar o final do header no buffer
+ */
+
 static int check_header_end(client_info *cli_info)
 {
   int num_bytes_header = 0;
@@ -584,7 +667,7 @@ static int check_header_end(client_info *cli_info)
 }
 /*!
  * \brief Faz o parse do HTTP request, resolve o path e chama a funcao para
- * preencher o status HTTP
+ * preencher o status HTTP,  o metodo e o content length caso ele exista
  *
  * param[in] dir_path path do diretorio raiz do servidor
  * param[out] cli_info Node atual
@@ -619,11 +702,29 @@ static int parse_http_request(client_info *cli_info, const char *dir_path)
   return 0;
 }
 
+/*!
+ * \brief Funcao para setar o cliente para um estado em que ele nao faca nada 
+ * ate que a thread responsavel por executar a tarefa desse cliente sinalize que
+ * terminou
+ *
+ * \param[in] cli_num Numero do cliente
+ * \param[out] cli_list Lista de clientes
+ * \param[out] cli_info node da lista de clientes
+ *
+ */
+
 static void end_job(client_list *cli_list, client_info *cli_info, int cli_num)
 {
   cli_list->client[cli_num].events = 0;
   cli_info->thread_finished = false;
 }
+
+/*!
+ * \brief Funcao para ler os dados de um socket 
+ *
+ * \param[in] cli_info node da lista de clientes
+ *
+ */
 
 static int get_client_data(client_info *cli_info)
 {
@@ -634,7 +735,7 @@ static int get_client_data(client_info *cli_info)
   {
     if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR)
     {
-      cli_info->empty_socket_count++;
+      cli_info->empty_socket_count++; //transformar isso em timeout (tempo)
       return -2;
     }
     else
@@ -648,6 +749,20 @@ static int get_client_data(client_info *cli_info)
 
   return 1;
 }
+
+/*!
+ * \brief Funcao que decide como os dados serao lidos de acordo com o metodo e 
+ * envio ou o nao do header 
+ *
+ * \param[in] t_pool estrutura com o pool de threads
+ * \param[in] cli_list Lista de clientes
+ * \param[in] cli_info node da lista de clientes
+ * \param[in] cli_num numero do cliente
+ *
+ * return 0 se for tudo ok
+ * return -1 se der algum erro
+ *
+ */
 
 static int read_data(client_info *cli_info, thread_pool *t_pool,
                      client_list *cli_list, int cli_num)
@@ -679,6 +794,17 @@ static int read_data(client_info *cli_info, thread_pool *t_pool,
   }
   return -1;
 }
+
+/*!
+ * \brief Funcao para enviar dados para um cliente 
+ *
+ * \param[in] buffer Buffer com os dados a serem enviados
+ * \param[in] cli_info node da lista de clientes
+ * \param[in] buf_size tamanho do buffer
+ *
+ * return 0 se for tudo ok
+ * return -1 se der algo errado
+ */
 
 static int send_to_client(client_info *cli_info, char *buffer, int buf_size)
 {
@@ -755,16 +881,18 @@ static char *status_msg(const http_code status)
 
 static void build_header(client_info *cli_info, int status)
 {
-    snprintf(cli_info->header, sizeof(cli_info->header),
-    "HTTP/1.0 %d %s\r\n\r\n", status, status_msg(status));
+  snprintf(cli_info->header, sizeof(cli_info->header), "HTTP/1.0 %d %s\r\n\r\n"
+  ,status, status_msg(status));
 }
 
 /*!
  * \brief Faz o processamento do request HTTP
  *
- * param[in] sockfd socket connectado
+ * param[in] t_pool pool de threads
  * param[in] cli_info Node atual
  * param[in] dir_path path do diretorio raiz do servidor
+ * param[in] cli_list lista de clientes
+ * param[in] cli_num numero do cliente
  *
  * return ret 0 para tudo ok, -1 para erro no request -2 caso socket esteja
  * vazio
@@ -787,6 +915,16 @@ int process_http_request(client_info *cli_info, const char *dir_path,
 
   return ret;
 }
+
+/*!
+ * \brief Essa funcao chama uma funcao para criar o header e a outra para enviar
+ * o arquivo que sera aberto para leitura/escrita tambem e aberto
+ *  
+ * \param[in] cli_list Lista de clientes
+ * \param[in] cli_info node da lista de clientes
+ * \param[in] dir_path path dos arquivos
+ *
+ */
 
 int build_and_send_header(client_info *cli_info, client_list *cli_list,
                           const char *dir_path)
@@ -876,6 +1014,13 @@ void read_filedata(void *cli_info)
   client->bucket.to_be_consumed_tokens, client->fp);
 }
 
+/*!
+ * \brief Escreve os dados do buffer do node em um arquivo
+ *
+ * param[out] cli_info Node atual
+ *
+ */
+
 void write_client_data (void *cli_info)
 {
   client_info *client = (client_info *)cli_info;
@@ -884,6 +1029,18 @@ void write_client_data (void *cli_info)
                         client->bytes_read - client->header_size, client->fp);
 }
 
+/*!
+ * \brief Escreve dados de acordo com o metodo
+ *
+ * param[in] t_pool pool de threads
+ * param[in] cli_info Node atual
+ * param[in] cli_list lista de clientes
+ * param[in] cli_num numero do cliente
+ *
+ * return 0 para tudo ok
+ * return ret -1 para erro no envio
+ *
+ */
 
 static int write_data(client_info *cli_info, thread_pool *t_pool,
                       client_list *cli_list, int cli_num)
@@ -985,15 +1142,20 @@ struct timespec find_poll_wait_time(client_info *cli_info,
 /*!
  * \brief Faz o cleanup caso o programa se receba um sinal
  *
- * \param[in] cli_list Lista de clientes
- *
+ * \param[out] cli_list Lista de clientes
+ * \param[out] t_pool pool de threads
  */
-void cleanup(client_list *cli_list)
+void cleanup(client_list *cli_list, thread_pool *t_pool)
 {
+  int i;
   client_info *cli_info, *curr_cli;
 
+  pthread_cond_broadcast(&(t_pool->notify));
+  for (i = 0; i < NTHREADS; i++)  
+    pthread_join(t_pool->threads[i], NULL);
+ 
   cli_info = cli_list->head;
-
+  
   while (cli_info)
   {
     curr_cli = cli_info;

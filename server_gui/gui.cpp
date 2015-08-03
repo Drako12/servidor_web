@@ -10,12 +10,16 @@ ServerControl::ServerControl(QWidget *parent)
 {
   port_label = new QLabel("Port");
   portlineEdit = new QLineEdit;
+  portlineEdit->setValidator(new QIntValidator(1024, 65535, this));
+  portlineEdit->setToolTip("Port Number has to be between 1024 and 65535");
   port_label->setBuddy(portlineEdit);
   path_label = new QLabel("Path");
   pathlineEdit = new QLineEdit;
   path_label->setBuddy(pathlineEdit);
+  pathlineEdit->setToolTip("Path with new directories will be created");
   rate_label = new QLabel("Rate");
   ratelineEdit = new QLineEdit;
+  ratelineEdit->setMaxLength(9);
   rate_label->setBuddy(ratelineEdit);
 
   applyButton = new QPushButton("Apply");
@@ -73,32 +77,51 @@ void ServerControl::applyClick()
   QString pathtext = pathlineEdit->text();
   QString ratetext = ratelineEdit->text();
 
-  QString filename = "server.ini";
-  QFile file(filename);
-  if (file.open(QIODevice::ReadWrite | QIODevice::Truncate))
+  QDir dir(pathtext);
+ 
+  if (!dir.exists())
   {
-    QTextStream stream(&file);
-   // stream << "[SERVER_SETTINGS]" <<endl;
-    stream << "PORT = " << porttext << endl;
-    stream << "PATH = " << pathtext << endl;
-    stream << "RATE = " << ratetext <<  endl;
+    if (dir.mkpath(".") == false)
+      QMessageBox::information(this, "Error", "Folder cant be created\n");
   }
-
-  file.close();
-
-  if ((fp = fopen("server.pid", "r")) == NULL)
-    QMessageBox::information(this, "Error", "Server pid file cant be found\n"
-    "Maybe server has not been started?");
   else
   {
-  kill(atoi(fgets(pid, 100, fp)), SIGHUP);
-  fclose(fp);
+    QFileInfo finfo(pathtext);
+    if (finfo.permission(QFile::WriteUser) == false)
+      QMessageBox::information(this, "Error", "Cant use this folder\n");
+    else
+    {
+      QString filename = "server.ini";
+      QFile file(filename);
+      if (file.open(QIODevice::ReadWrite | QIODevice::Truncate))
+      {
+        QTextStream stream(&file);
+        stream << "PORT = " << porttext << endl;
+        stream << "PATH = " << pathtext << endl;
+        stream << "RATE = " << ratetext <<  endl;
+      }
+
+      file.close();
+
+      if ((fp = fopen("server.pid", "r")) == NULL)
+        QMessageBox::information(this, "Error", "Server pid file cant be found\n"
+        "Maybe server has not been started?");
+      else
+      {
+      kill(atoi(fgets(pid, 100, fp)), SIGHUP);
+      fclose(fp);
+      }
+    }
   }
 }
 
 void ServerControl::enableApplyButton(const QString &text)
 {
-  applyButton->setEnabled(!text.isEmpty());
+  if (portlineEdit->hasAcceptableInput() == TRUE || portlineEdit->text().isEmpty())
+    applyButton->setEnabled(!text.isEmpty());
+  else
+    applyButton->setEnabled(false);
+
 }
 
 void ServerControl::clearClick()

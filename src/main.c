@@ -69,7 +69,7 @@ int main(int argc, char *argv[])
 
     if (settings)
     {
-      change_settings(&cli_list, listenfd, &s_info);
+      change_settings(&cli_list, &s_info);
       settings = 0;
       memset(&poll_wait, 0, sizeof(poll_wait));
     }
@@ -130,7 +130,7 @@ int main(int argc, char *argv[])
     }
   }
 
-  cleanup(&cli_list);
+  cleanup(&cli_list, &pool);
   return 0;
 }
 

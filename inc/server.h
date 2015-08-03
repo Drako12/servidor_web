@@ -37,6 +37,7 @@
 #define SERVER_INDEX 0
 #define LOCAL_SOCKET 1
 #define MAX_LONG 10
+#define INI_OFFSET 7 
 #define FORMAT(S)
 #define RESOLVE(S) FORMAT(S)
 #define STR_STATUS FORMAT(MAX_HTTP_STATUS_LEN)
@@ -102,7 +103,7 @@ typedef struct client_list_
 
 
 int save_pid_file();
-void change_settings(client_list *cli_list, int listenfd, server_info *s_info);
+void change_settings(client_list *cli_list, server_info *s_info);
 int parse_and_fill_server_info(int n_params, char *dir_path, char *port,
                                char *rate, server_info *s_info);
 int server_start_listen(const server_info *s_info);
@@ -124,7 +125,7 @@ int set_nonblock(int sockfd);
 void set_clients(client_info *cli_info, client_list *cli_list, int cli_num);
 struct timespec find_poll_wait_time(client_info *cli_info,
                                     struct timespec t_wait);
-void cleanup(client_list *cli_list);
+void cleanup(client_list *cli_list, thread_pool *t_pool);
 int server_socket_init();
 void read_filedata(void *cli_info);
 
