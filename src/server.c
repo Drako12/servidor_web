@@ -51,7 +51,7 @@ static void change_port(server_info *s_info, client_list *cli_list,
   int listenfd;
 
   strcpy(s_info->port, iniLine + INI_OFFSET);
-  if((listenfd = server_start_listen(s_info)) == -1)
+  if ((listenfd = server_start_listen(s_info)) == -1)
     fprintf(stderr, "Error changing ports");
   else
   {
@@ -107,7 +107,7 @@ static void change_rate(server_info *s_info, char *iniLine, client_info *cli)
  *
  */
 
-void change_settings(client_list *cli_list, server_info *s_info)
+int change_conf(client_list *cli_list, server_info *s_info)
 {
   char iniLine[MAX_INI_LINE];
   char *line_aux;
@@ -115,7 +115,10 @@ void change_settings(client_list *cli_list, server_info *s_info)
   client_info *cli = cli_list->head;
 
   if ((iniFile = fopen("server.ini", "r")) == NULL)
-    fprintf(stderr, "Ini file not found");
+  {
+    fprintf(stderr, "Ini file not found\n GUI will not work");
+    return 0;
+  }
 
 
   while (fgets(iniLine, sizeof(iniLine), iniFile))
@@ -125,21 +128,24 @@ void change_settings(client_list *cli_list, server_info *s_info)
     if (strncmp(iniLine + INI_OFFSET, "", 1) == 0)
       continue;
 
-    if ((line_aux = strstr(iniLine, "PORT")) != NULL)
+    else if ((line_aux = strstr(iniLine, "PORT")) != NULL)
+    {
       if (strcmp(s_info->port, iniLine + INI_OFFSET) != 0)
         change_port(s_info, cli_list, line_aux);
-
-    if ((line_aux = strstr(iniLine, "PATH")) != NULL)
+    }
+    else if ((line_aux = strstr(iniLine, "PATH")) != NULL)
+    {
       if (strcmp(s_info->dir_path, iniLine + INI_OFFSET) != 0)
         change_path(s_info, line_aux);
-
-    if ((line_aux = strstr(iniLine, "RATE")) != NULL)
+    }
+    else if ((line_aux = strstr(iniLine, "RATE")) != NULL)
+    {
       if (s_info->client_rate != atoll(iniLine + INI_OFFSET))
         change_rate(s_info, line_aux, cli);
-
+    }
   }
   fclose(iniFile);
-
+  return 0;
 }
 
 
@@ -232,7 +238,6 @@ int server_start_listen(const server_info *s_info)
     {
       close (listenfd);
       fprintf(stderr, "Bind error:%s\n",strerror(errno));
-      continue;
     }
   }
 
@@ -284,6 +289,7 @@ void client_list_init(client_list *cli_list, int listenfd, int max_clients,
   int i;
   memset(cli_list, 0, sizeof(*cli_list));
   cli_list->client = calloc(max_clients, sizeof(struct pollfd));
+
   cli_list->client[SERVER_INDEX].fd = listenfd;
   cli_list->client[SERVER_INDEX].events = POLLIN;
   cli_list->client[LOCAL_SOCKET].fd = sockfd;
@@ -299,17 +305,27 @@ void client_list_init(client_list *cli_list, int listenfd, int max_clients,
  * \param[out] s_info Dados de configuracao do servidor
  */
 
-static void inc_max_clients(client_list *cli_list, server_info *s_info)
+static int inc_max_clients(client_list *cli_list, server_info *s_info)
 {
-  int i;
+  int i, new_size;
+  struct pollfd *new_cli_list = NULL;
 
-  s_info->max_clients *= 2;
-  cli_list->client = realloc(cli_list->client,
-                             s_info->max_clients * sizeof(*cli_list->client));
+  new_size = s_info->max_clients * 2;
+  new_cli_list = (struct pollfd *)realloc(cli_list->client,
+                         new_size * sizeof(struct pollfd));
 
-  for (i = cli_list->list_len + 1; i < s_info->max_clients; i++)
-    cli_list->client[i].fd = -1;
+  if (new_cli_list != NULL)
+  {
+    s_info->max_clients = new_size;
+    cli_list->client = new_cli_list;
 
+    for (i = cli_list->list_len + 1; i < s_info->max_clients; i++)
+      cli_list->client[i].fd = -1;
+  }
+  else
+    return -1;
+
+  return 0;
 }
 
 /*!
@@ -319,11 +335,24 @@ static void inc_max_clients(client_list *cli_list, server_info *s_info)
  * \param[out] s_info Dados de configuracao do servidor
  */
 
-static void dec_max_clients(client_list *cli_list, server_info *s_info)
+static int dec_max_clients(client_list *cli_list, server_info *s_info)
 {
-  s_info->max_clients /= 2;
-  cli_list->client = realloc(cli_list->client,
-                             s_info->max_clients * sizeof(*cli_list->client));
+  int new_size;
+  struct pollfd *new_cli_list;
+
+  new_size = s_info->max_clients / 2;
+  new_cli_list = realloc(cli_list->client,
+                         new_size * sizeof(*cli_list->client));
+
+  if (new_cli_list != NULL)
+  {
+    s_info->max_clients = new_size;
+    cli_list->client = new_cli_list;
+  }
+  else
+    return -1;
+
+  return 0;
 }
 
 /*!
@@ -335,14 +364,16 @@ static void dec_max_clients(client_list *cli_list, server_info *s_info)
  * \param[out] cli_list lista de clientes
  *
  */
-void get_thread_msg(client_list *cli_list)
+int get_thread_msg(client_list *cli_list)
 {
   int num_bytes, sockfd, i;
   void *s_msg = NULL;
   client_info *cli;
 
-  num_bytes = read(cli_list->client[LOCAL_SOCKET].fd, &s_msg,
-                   sizeof(cli_list->head));
+  if ((num_bytes = read(cli_list->client[LOCAL_SOCKET].fd, &s_msg,
+                   sizeof(cli_list->head))) < 0)
+    return 0;
+
   cli = (client_info *)s_msg;
   sockfd = cli->sockfd;
 
@@ -350,8 +381,15 @@ void get_thread_msg(client_list *cli_list)
   {
     if (sockfd == cli_list->client[i].fd)
     {
+      if (cli->io_error == true)
+      {
+        cli->job_status = ERROR;
+        cli->io_error = false;
+        return i;
+      }
+
       cli_list->client[i].events = POLLIN | POLLOUT;
-      cli->thread_finished = true;
+      cli->job_status = FINISHED;
       break;
     }
   }
@@ -359,6 +397,7 @@ void get_thread_msg(client_list *cli_list)
     cli->bytes_read = 0;
   cli->header_size = 0;
 
+  return 0;
 }
 
 /*!
@@ -392,7 +431,8 @@ static int set_client_struct(client_info *cli_info, client_list *cli_list,
   if (cli_info->buffer == NULL)
     return -1;
   cli_info->is_ready = true;
-  cli_info->thread_finished = true;
+  cli_info->io_error = false;
+  cli_info->job_status = FINISHED;
   cli_info->sockfd = cli_list->client[cli_num].fd;
   cli_info->timestamp = time_now();
   set_to_be_consumed_tokens(cli_info);
@@ -410,7 +450,8 @@ static int set_client_struct(client_info *cli_info, client_list *cli_list,
  * return NULL se nao conseguir alocar o node
  */
 
-static client_info *list_add(client_list *cli_list, server_info *s_info)
+static client_info *list_add(client_list *cli_list, server_info *s_info,
+                             thread_pool *t_pool)
 {
   int cli_num;
   client_info *cli_info;
@@ -418,6 +459,7 @@ static client_info *list_add(client_list *cli_list, server_info *s_info)
   cli_num = cli_list->list_len + 2;
 
   cli_info = calloc(1, sizeof(*cli_info));
+
   if (cli_info == NULL)
     return NULL;
   if (cli_list->head == NULL)
@@ -431,11 +473,15 @@ static client_info *list_add(client_list *cli_list, server_info *s_info)
   }
   cli_list->list_len++;
 
+  pthread_mutex_lock(&(t_pool->lock));
+
   if (cli_list->list_len == s_info->max_clients)
     inc_max_clients(cli_list, s_info);
   else if (cli_list->list_len == (s_info->max_clients/4 &&
            cli_list->list_len > NCLIENTS))
     dec_max_clients(cli_list, s_info);
+
+  pthread_mutex_unlock(&(t_pool->lock));
 
   if ((set_nonblock(cli_list->client[cli_num].fd)) == -1)
   {
@@ -444,10 +490,12 @@ static client_info *list_add(client_list *cli_list, server_info *s_info)
     return NULL;
   }
 
+
   bucket_init(&cli_info->bucket, 50000, 50000, s_info->client_rate);
 
   if (set_client_struct(cli_info, cli_list, cli_num) == -1)
     return NULL;
+
 
   return cli_info;
 }
@@ -480,7 +528,8 @@ int set_nonblock(int sockfd)
  * return -1 se der algum erro
  */
 
-int check_connection(client_list *cli_list, server_info *s_info)
+int check_connection(client_list *cli_list, server_info *s_info,
+                     thread_pool *t_pool)
 {
   int connfd, cli_num;
   socklen_t clilen;
@@ -489,14 +538,15 @@ int check_connection(client_list *cli_list, server_info *s_info)
   cli_num = cli_list->list_len + 2;
 
   clilen = sizeof(cli_addr);
-  if((connfd = accept(cli_list->client[SERVER_INDEX].fd,
-                     (struct sockaddr *)&cli_addr, &clilen)) == -1)
+  if ((connfd = accept(cli_list->client[SERVER_INDEX].fd,
+                      (struct sockaddr *)&cli_addr, &clilen)) == -1)
     return -1;
+
 
   cli_list->client[cli_num].fd = connfd;
   cli_list->client[cli_num].events = POLLIN | POLLOUT;
 
-  if(!(list_add(cli_list, s_info)))
+  if (!(list_add(cli_list, s_info, t_pool)))
   {
     close(cli_list->client[cli_num].fd);
     shift_client_list(cli_list, cli_num);
@@ -713,11 +763,12 @@ static int parse_http_request(client_info *cli_info, const char *dir_path)
  * \param[out] cli_info node da lista de clientes
  *
  */
-
-static void end_job(client_list *cli_list, client_info *cli_info, int cli_num)
+//trocar nome
+static void hold_client(client_list *cli_list, client_info *cli_info,
+                        int cli_num)
 {
   cli_list->client[cli_num].events = 0;
-  cli_info->thread_finished = false;
+  cli_info->job_status = RUNNING;
 }
 
 /*!
@@ -775,11 +826,13 @@ static int read_data(client_info *cli_info, thread_pool *t_pool,
 {
   if (!cli_info->header_sent)
   {
+    int ret;
+
     if (cli_info->bucket.to_be_consumed_tokens < HEADERSIZE)
       cli_info->bucket.to_be_consumed_tokens = BUFSIZE;
 
-    if (get_client_data(cli_info) == -1)
-      return -1;
+    if ((ret = get_client_data(cli_info)) < 0)
+      return ret;
 
     set_to_be_consumed_tokens(cli_info);
     cli_info->header_size = check_header_end(cli_info);
@@ -791,7 +844,7 @@ static int read_data(client_info *cli_info, thread_pool *t_pool,
   {
   case GET:
     add_job(t_pool, read_filedata, cli_info);
-    end_job(cli_list, cli_info, cli_num);
+    hold_client(cli_list, cli_info, cli_num);
     return 0;
     break;
   case PUT:
@@ -999,7 +1052,7 @@ void set_clients(client_info *cli_info, client_list *cli_list, int cli_num)
 
   if (!cli_info->is_ready)
     cli_list->client[cli_num].events = 0;
-  else if (cli_info->header_sent && cli_info->thread_finished)
+  else if (cli_info->header_sent && cli_info->job_status == FINISHED)
     cli_list->client[cli_num].events = POLLIN | POLLOUT;
 }
 
@@ -1016,6 +1069,9 @@ void read_filedata(void *cli_info)
 
   client->bytes_read = fread(client->buffer, 1,
   client->bucket.to_be_consumed_tokens, client->fp);
+
+  if (client->bytes_read == -1)
+    client->io_error = true;
 }
 
 /*!
@@ -1031,6 +1087,9 @@ void write_client_data (void *cli_info)
 
   client->bytes_write = fwrite(client->buffer + client->header_size, 1,
                         client->bytes_read - client->header_size, client->fp);
+
+  if (client->bytes_write == -1)
+    client->io_error = true;
 }
 
 /*!
@@ -1064,7 +1123,7 @@ static int write_data(client_info *cli_info, thread_pool *t_pool,
   case PUT:
     cli_info->bytes_write = cli_info->bucket.to_be_consumed_tokens;
     add_job(t_pool, write_client_data, cli_info);
-    end_job(cli_list, cli_info, cli_num);
+    hold_client(cli_list, cli_info, cli_num);
     return 0;
     break;
   }
@@ -1092,7 +1151,7 @@ int process_bucket_and_data(client_info *cli_info, thread_pool *t_pool,
   if (!cli_info->is_ready)
     return 0;
 
-  if (cli_info->thread_finished)
+  if (cli_info->job_status == FINISHED)
   {
     int read_ret = 0, write_ret = 0;
 

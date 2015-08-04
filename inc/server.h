@@ -37,7 +37,7 @@
 #define SERVER_INDEX 0
 #define LOCAL_SOCKET 1
 #define MAX_LONG 10
-#define INI_OFFSET 7 
+#define INI_OFFSET 7
 #define FORMAT(S)
 #define RESOLVE(S) FORMAT(S)
 #define STR_STATUS FORMAT(MAX_HTTP_STATUS_LEN)
@@ -61,9 +61,15 @@ typedef enum methods_
 {
   GET = 1,
   PUT
-}methods;
+} methods;
 
+typedef enum job_status_
+{
+  RUNNING = 0,
+  FINISHED,
+  ERROR
 
+} job_stat;
 typedef struct server_info_
 {
   char dir_path[PATH_MAX];
@@ -88,7 +94,8 @@ typedef struct client_info_
   long content_length;
   bool header_sent;
   bool is_ready;
-  bool thread_finished;
+  bool io_error;
+  job_stat job_status;
   FILE *fp;
   struct client_info_ *next;
   methods method;
@@ -104,16 +111,17 @@ typedef struct client_list_
 
 
 int save_pid_file();
-void change_settings(client_list *cli_list, server_info *s_info);
+int change_conf(client_list *cli_list, server_info *s_info);
 int parse_and_fill_server_info(int n_params, char *dir_path, char *port,
                                char *rate, server_info *s_info);
 int server_start_listen(const server_info *s_info);
 void client_list_init(client_list *cli_list, int listenfd, int max_clients,
                       int sockfd);
-void get_thread_msg(client_list *cli_list);
+int get_thread_msg(client_list *cli_list);
 void close_connection(client_info *cli_info, client_list *cli_list,
                       int cli_num);
-int check_connection(client_list *cli_list, server_info *s_info);
+int check_connection(client_list *cli_list, server_info *s_info,
+                     thread_pool *t_pool);
 int process_http_request(client_info *cli_info, const char *dir_path,
                          thread_pool *t_pool, client_list *cli_list,
                          int cli_num);
@@ -129,6 +137,7 @@ struct timespec find_poll_wait_time(client_info *cli_info,
 void cleanup(client_list *cli_list, thread_pool *t_pool);
 int server_socket_init();
 void read_filedata(void *cli_info);
+void write_client_data (void *cli_info);
 long long find_timeout(long long now, client_info *cli_info);
 
 #endif

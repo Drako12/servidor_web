@@ -79,8 +79,6 @@ void ServerControl::applyClick()
 
   QDir dir(pathtext);
 
-  //dir = dir.makeAbsolute();
-
   if (!dir.exists())
   {
     if (dir.mkpath(".") == false)
@@ -101,7 +99,8 @@ void ServerControl::applyClick()
       QString path;
       QFile file(filename);
 
-      path = dir.absolutePath();
+      if (!path.isEmpty())
+        path = dir.absolutePath();
 
       if (file.open(QIODevice::ReadWrite | QIODevice::Truncate))
       {

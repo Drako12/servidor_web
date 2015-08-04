@@ -2,14 +2,14 @@
 #include "bucket.h"
 #include "thread.h"
 
-volatile int finished, settings = 0;
+volatile int finished, conf_changed = 0;
 
 void signal_callback_handler(int signum)
 {
   if (signum == SIGINT)
     finished = 1;
-  if (signum == SIGHUP)
-    settings = 1;
+  else if (signum == SIGHUP)
+    conf_changed = 1;
 }
 
 int main(int argc, char *argv[])
@@ -66,10 +66,10 @@ int main(int argc, char *argv[])
     if (cli_list.list_len > 0)
       time_p = &poll_wait;
 
-    if (settings)
+    if (conf_changed)
     {
-      change_settings(&cli_list, &s_info);
-      settings = 0;
+      change_conf(&cli_list, &s_info);
+      conf_changed = 0;
       memset(&poll_wait, 0, sizeof(poll_wait));
     }
 
@@ -78,12 +78,13 @@ int main(int argc, char *argv[])
       continue;
 
     if (cli_list.client[SERVER_INDEX].revents & POLLIN)
-      if (check_connection(&cli_list, &s_info) == -1 || --ret <= 0)
+      if (check_connection(&cli_list, &s_info, &pool) == -1 || --ret <= 0)
         continue;
 
     if (cli_list.client[LOCAL_SOCKET].revents & POLLIN)
     {
-      get_thread_msg(&cli_list);
+      if ((cli_num = get_thread_msg(&cli_list)) > 0)
+        goto close;
       continue;
     }
 
@@ -99,8 +100,14 @@ int main(int argc, char *argv[])
       set_clients(cli_info, &cli_list, cli_num);
       poll_wait = find_poll_wait_time(cli_info, poll_wait);
 
-      if ((cli_list.client[cli_num].revents & (POLLIN | POLLOUT))
-          && cli_info->method == 0)
+      if (cli_list.client[cli_num].revents == 0)
+      {
+        cli_info = cli_info->next;
+        cli_num++;
+        continue;
+      }
+
+      if (!cli_info->method)
       {
         if ((ret = process_http_request(cli_info, s_info.dir_path, &pool,
                                         &cli_list, cli_num) < 0))
@@ -112,10 +119,9 @@ int main(int argc, char *argv[])
         if (build_and_send_header(cli_info, &cli_list, s_info.dir_path) == -1)
           goto close;
       }
-      else if ((cli_list.client[cli_num].revents & (POLLOUT | POLLIN)) &&
-               cli_info->header_sent)
+      else if (cli_info->header_sent)
         if (process_bucket_and_data(cli_info, &pool, &cli_list, cli_num) == -1
-            && cli_info->thread_finished)
+            && cli_info->job_status == FINISHED)
           goto close;
 
       if (cli_list.client[cli_num].revents & (POLLERR | POLLHUP | POLLNVAL))
@@ -128,7 +134,6 @@ int main(int argc, char *argv[])
 
 close:
   close_connection(cli_info, &cli_list, cli_num);
-
   }
 
   cleanup(&cli_list, &pool);

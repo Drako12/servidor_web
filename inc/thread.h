@@ -18,6 +18,7 @@ typedef struct jobs_
 {
   void (*function)(void *);
   void *arg;
+  bool error;
   struct jobs_ *next;
 } jobs;
 

@@ -51,7 +51,8 @@ static void refill_tokens(t_bucket *bucket)
  *
  */
 
-void bucket_init(t_bucket *bucket, long long tokens, long long capacity, long long rate)
+void bucket_init(t_bucket *bucket, long long tokens, long long capacity,
+                 long long rate)
 {
   bucket->capacity = capacity;
   bucket->tokens = tokens;

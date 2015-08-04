@@ -49,31 +49,25 @@ void *handle_thread(void *pool)
   main_addr.sun_family = AF_UNIX;
   strcpy(main_addr.sun_path, "/tmp/SERVER_SOCKET");
   sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
-  connect(sockfd, (struct sockaddr *)&main_addr, sizeof(main_addr));
+  if (connect(sockfd, (struct sockaddr *)&main_addr, sizeof(main_addr)) == -1)
+    t_pool->finished = true;
+
 
   while (!t_pool->finished)
   {
-    pthread_mutex_lock(&(t_pool->lock));
-
-    if (t_pool->queue.size == 0)
-      pthread_cond_wait(&(t_pool->notify), &(t_pool->lock));
-
     job = get_job(t_pool);
-    pthread_mutex_unlock(&(t_pool->lock));
 
     if (job)
     {
-      void (*func)(void *arg);
-      void *args;
+      job->function(job->arg);
 
-      func = job->function;
-      args = job->arg;
-      func(args);
-      write(sockfd, &job->arg, sizeof(job->arg));
+      if (write(sockfd, &job->arg, sizeof(job->arg)) < 0)
+        return NULL;
+
       free(job);
     }
   }
-  return NULL; //pthread_exit
+  return NULL;
 }
 
 
@@ -110,9 +104,7 @@ int add_job(thread_pool *t_pool, void (*function)(void *), void *arg)
   job->function = function;
   job->arg = arg;
 
-  if (t_pool->queue.size >= 1)
-    pthread_cond_signal(&(t_pool->notify));
-
+  pthread_cond_signal(&(t_pool->notify));
   pthread_mutex_unlock(&(t_pool->lock));
 
   return 0;
@@ -131,12 +123,19 @@ jobs *get_job(thread_pool *t_pool)
 {
   jobs *job;
 
-  job = t_pool->queue.head;
+  pthread_mutex_lock(&(t_pool->lock));
+
+  if (t_pool->queue.size == 0)
+    pthread_cond_wait(&(t_pool->notify), &(t_pool->lock));
+
+ job = t_pool->queue.head;
 
   if (t_pool->queue.size > 0)
   {
     t_pool->queue.head = job->next;
     t_pool->queue.size--;
   }
+  pthread_mutex_unlock(&(t_pool->lock));
+
   return job;
 }
